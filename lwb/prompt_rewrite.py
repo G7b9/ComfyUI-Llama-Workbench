@@ -292,8 +292,6 @@ def parse_prompt_rewrite_json(
     ratio_follow = value.get("ratio_follow", "").strip()
     if not rewritten:
         raise PromptRewriteFormatError("rewritten_prompt must not be empty")
-    if "\n" in rewritten or "\r" in rewritten:
-        raise PromptRewriteFormatError("rewritten_prompt must be a single paragraph without line breaks")
     if wh_ratio and not _RATIO.fullmatch(wh_ratio):
         raise PromptRewriteFormatError("wh_ratio must be empty or a positive W:H integer ratio")
 

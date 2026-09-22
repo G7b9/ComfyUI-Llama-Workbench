@@ -100,12 +100,20 @@ def test_strict_t2i_parser_normalizes_the_structured_outputs():
         ('{"rewritten_prompt":"x","wh_ratio":"1:1","extra":true}', "unexpected"),
         ('{"rewritten_prompt":"x","wh_ratio":"1:1","wh_ratio":"3:2"}', "repeats"),
         ('{"rewritten_prompt":"x","wh_ratio":""}', "non-empty wh_ratio"),
-        ('{"rewritten_prompt":"x\\ny","wh_ratio":"1:1"}', "single paragraph"),
     ],
 )
 def test_strict_parser_rejects_wrappers_unknown_fields_and_invalid_values(answer, match):
     with pytest.raises(PromptRewriteFormatError, match=match):
         parse_prompt_rewrite_json(answer, PROMPT_REWRITE_PROFILES["t2i"])
+
+
+def test_strict_parser_accepts_escaped_line_breaks_inside_rewritten_prompt():
+    parsed = parse_prompt_rewrite_json(
+        '{"rewritten_prompt":"top region\\n\\nbottom region","wh_ratio":"3:4"}',
+        PROMPT_REWRITE_PROFILES["t2i"],
+    )
+
+    assert parsed["rewritten_prompt"] == "top region\n\nbottom region"
 
 
 def test_edit_parser_enforces_mutual_exclusion_and_image_bounds():
