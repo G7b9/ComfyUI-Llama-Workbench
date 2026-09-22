@@ -70,6 +70,7 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 | Llama Workbench Release Embedded Model | 显式关闭嵌入式模型。 |
 | Llama Workbench Prompt / Image2Prompt | 通过统一后端 socket 进行文本提示或图像反推提示词。图像 socket 会随着连接从 `image` 变为 `image1`、`image2` 等，最多 10 个；还提供 `seed`、`max_images`、`max_image_edge`、`auto_unload` 以及默认关闭的 `thinking` 控制。 |
 | Llama Workbench Qwen Image 2.1 Prompt Enhancer | 通过 Workbench backend 原生执行结构化提示词改写。使用官方 T2I/edit 采样 profile，强制开启 thinking，严格输出 `rewritten_prompt`、`wh_ratio`、`ratio_follow`，并对一次格式错误进行一次重试。匹配的 System Prompt 必须由用户粘贴或从本地文件加载。 |
+| Llama Workbench Qwen Image 2.1 PE Resolution | 按可选的百万像素预算，将 Prompt Enhancer 的 `wh_ratio` 转换为取整后的宽高，可直接连接 `EmptyLatentImage`。 |
 | Llama Workbench Chat | 交互式本地聊天：输入文本后点击节点上的 **发送** 按钮，只会将此 Chat 节点及其上游依赖加入队列，不需要点击 Queue Prompt。节点有实用的初始尺寸，可以自由调整大小，长历史记录会在可滚动的画布区域中显示。`clear_context_before_run` 默认开启，每次排队的工作流都会从新上下文开始；关闭后可继续多轮对话。`use_cache` 默认开启，会独立于 `seed` 重用未变化的完整请求；关闭后可强制新的模型请求。缓存开启时会跳过 `release_comfy_cache_after_run`，以便继续复用响应。`release_owned_server_after_run` 默认开启，Chat 响应后会立即停止自有 llama-server，再让下游 H3/视频节点分配显存。节点包含 **清空上下文** / **清空输入** 操作和文本 token 上下文计量器。Start Server 会自动提供计量器所需的 `context_size`；外部 Connection 需要设置 `context_size` 才能显示百分比。还支持图持久化历史、直接的 `max_tokens` / `seed` / `thinking` / `auto_unload` 控制，以及带 `max_image_edge` 的动态图像 socket（最多 10 张）。 |
 | Llama Workbench Chat Output Display | 仅画布终端查看器，分别预览 Chat 节点的 `thinking` 和 `assistant_message` 输出。 |
 | Llama Workbench Chat Settings | 系统提示词、采样、上下文历史和图像尺寸控制。 |
@@ -79,8 +80,8 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 
 [`examples/`](examples/README.md) 中包含五个可直接导入的工作流 JSON：自有服务器聊天、
 连接已有服务器进行图像反推提示词、Skill 聊天，以及嵌入式 Qwen/Gemma VLM 图像反推
-提示词和 Qwen Image 2.1 PE-T2I GGUF 提示词改写。运行前请将其中的通用模型和二进制
-占位路径替换为 ComfyUI 主机可访问的路径。
+提示词和完整的 Qwen Image 2.1 PE-T2I GGUF → 原生图像生成流程。运行前请将其中的通用
+模型和二进制占位路径替换为 ComfyUI 主机可访问的路径。
 
 Prompt / Image2Prompt 节点的 `max_tokens` 默认值为 `-1`，llama-server 会将其解释为
 不限生成长度。生成仍会在 EOS 或模型上下文处理结束时停止；如果需要限制延迟或输出
@@ -128,6 +129,11 @@ JSON 对象，不接受 Markdown 代码围栏、对象外文本、修复后的 J
 `rewritten_prompt`、`wh_ratio` 和规范化为空字符串的 `ratio_follow` 会作为独立 socket
 输出，同时提供 `result_json`。第一次格式错误会触发一次纠正重试；第二次仍错误就停止
 工作流，不会把不可靠文本静默传给下游。
+
+将 `wh_ratio` 连接到 **Llama Workbench Qwen Image 2.1 PE Resolution**，即可按指定
+百万像素预算换算出 `width` 和 `height`。完整示例
+`05_qwen-image-2.1-pe-t2i-gguf.json` 已将这两个输出及 `rewritten_prompt` 接入
+ComfyUI 原生 Qwen-Image-2.1 生成链；在扩散采样前会自动卸载 PE 服务，并保存生成图像。
 
 节点已为后续 PE-I2I 暴露 `edit` profile 和有序的 `image1`…`image10` 传输接口。该
 profile 使用官方编辑采样差异（`presence_penalty=0`、`max_tokens=24000`），并要求至少

@@ -11,6 +11,7 @@ as a local file.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -111,6 +112,46 @@ def get_prompt_rewrite_profile(task: str) -> PromptRewriteProfile:
     except KeyError as exc:
         choices = ", ".join(PROMPT_REWRITE_PROFILES)
         raise ValueError(f"Unknown prompt-enhancer task {task!r}; choose one of: {choices}") from exc
+
+
+def prompt_rewrite_dimensions(
+    wh_ratio: str,
+    *,
+    megapixels: float = 1.0,
+    multiple: int = 8,
+) -> tuple[int, int, str]:
+    """Convert a PE ``wh_ratio`` into generation dimensions.
+
+    Qwen PE deliberately returns a ratio rather than fixed pixel dimensions.
+    Keeping this conversion separate lets workflows choose their own pixel
+    budget while preserving the model-selected composition.
+    """
+
+    ratio = str(wh_ratio or "").strip()
+    match = _RATIO.fullmatch(ratio)
+    if not match:
+        raise ValueError("wh_ratio must be a positive W:H integer ratio")
+    try:
+        target_megapixels = float(megapixels)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("megapixels must be a positive number") from exc
+    if not math.isfinite(target_megapixels) or target_megapixels <= 0:
+        raise ValueError("megapixels must be a positive number")
+    try:
+        rounding_multiple = int(multiple)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("multiple must be a positive integer") from exc
+    if rounding_multiple <= 0:
+        raise ValueError("multiple must be a positive integer")
+
+    ratio_width, ratio_height = (int(part) for part in match.groups())
+    divisor = math.gcd(ratio_width, ratio_height)
+    normalized_ratio = f"{ratio_width // divisor}:{ratio_height // divisor}"
+    target_pixels = target_megapixels * 1024 * 1024
+    scale = math.sqrt(target_pixels / (ratio_width * ratio_height))
+    width = max(rounding_multiple, round(ratio_width * scale / rounding_multiple) * rounding_multiple)
+    height = max(rounding_multiple, round(ratio_height * scale / rounding_multiple) * rounding_multiple)
+    return width, height, normalized_ratio
 
 
 def load_system_prompt(system_prompt: str = "", system_prompt_path: str = "") -> str:

@@ -78,6 +78,7 @@ long reasoning or unlimited-token responses.
 | Llama Workbench Release Embedded Model | Closes an embedded model explicitly. |
 | Llama Workbench Prompt / Image2Prompt | Text prompting and image-to-prompt from a unified backend socket. Its image socket grows from `image` to `image1`, `image2`, and so on as connections are added (up to 10). It also has `seed`, `max_images`, `max_image_edge`, `auto_unload`, and a `thinking` control that defaults to `off`. |
 | Llama Workbench Qwen Image 2.1 Prompt Enhancer | Native structured prompt rewriting over a Workbench backend. It uses the official T2I/edit sampling profiles, forces thinking on, strictly returns `rewritten_prompt`, `wh_ratio`, and `ratio_follow`, and retries one malformed response once. The matching System Prompt must be pasted or loaded from a local file. |
+| Llama Workbench Qwen Image 2.1 PE Resolution | Converts Prompt Enhancer's `wh_ratio` into rounded width and height at a selectable megapixel budget, ready for `EmptyLatentImage`. |
 | Llama Workbench Chat | Interactive local chat: enter text and click its on-node **发送** button to queue only this Chat node and its upstream dependencies (no Queue Prompt click); it starts at a practical default size, remains freely resizable, and keeps long history in a scrollable canvas viewport. `clear_context_before_run` defaults to on, so every queued workflow starts fresh; turn it off for a continuing multi-turn conversation. `use_cache` defaults to on and reuses an unchanged complete request independently of `seed`; turn it off to force a fresh model request. While it is on, `release_comfy_cache_after_run` is skipped so the response remains reusable. `release_owned_server_after_run` defaults to on and stops an owned llama-server immediately after Chat responds, before downstream H3/video nodes allocate VRAM. **清空上下文** / **清空输入** actions and a text-token context meter are included. Start Server supplies the meter's `context_size` automatically; set `context_size` on an external Connection to obtain a percentage. Graph-persisted history, direct `max_tokens` / `seed` / `thinking` / `auto_unload` controls, and dynamic image sockets (up to 10) with `max_image_edge` are also included. |
 | Llama Workbench Chat Output Display | Canvas-only terminal viewer that separately previews a Chat node's `thinking` and `assistant_message` outputs. |
 | Llama Workbench Chat Settings | System prompt, sampling, context-history, and image-size controls. |
@@ -149,6 +150,13 @@ exposes `rewritten_prompt`, `wh_ratio`, and the normalized empty
 `ratio_follow` as separate sockets plus `result_json`. A formatting failure
 gets one corrective retry; a second failure stops the workflow with an error
 instead of silently passing unreliable text downstream.
+
+Connect `wh_ratio` to **Llama Workbench Qwen Image 2.1 PE Resolution** to turn
+the selected aspect ratio into `width` and `height` at a chosen megapixel
+budget. The complete `05_qwen-image-2.1-pe-t2i-gguf.json` example wires these
+outputs and `rewritten_prompt` into ComfyUI's native Qwen-Image-2.1 generation
+chain, auto-unloads the PE server before diffusion sampling, and saves the
+generated image.
 
 The `edit` profile and ordered `image1`…`image10` transport are already exposed
 for the later PE-I2I path. It uses the official edit sampling differences

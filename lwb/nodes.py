@@ -13,7 +13,7 @@ from .backend import EmbeddedBackend, ServerBackend, backend_descriptor, make_te
 from .embedded import EMBEDDED_MODELS, create_embedded_backend
 from .media import image_tensor_to_data_urls
 from .process import OWNED_SERVER, ServerLaunchConfig
-from .prompt_rewrite import MAX_PROMPT_REWRITE_IMAGES, rewrite_prompt
+from .prompt_rewrite import MAX_PROMPT_REWRITE_IMAGES, prompt_rewrite_dimensions, rewrite_prompt
 from .skills import (
     Skill,
     build_skill_instruction,
@@ -844,6 +844,52 @@ class LlamaWorkbenchPromptEnhancer:
         return {"ui": ui, "result": outputs}
 
 
+class LlamaWorkbenchQwenImage21PEResolution:
+    """Turn Prompt Enhancer's aspect-ratio output into latent dimensions."""
+
+    CATEGORY = "Llama Workbench / Generation"
+    RETURN_TYPES = ("INT", "INT", "STRING")
+    RETURN_NAMES = ("width", "height", "normalized_ratio")
+    FUNCTION = "select"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "wh_ratio": (
+                    "STRING",
+                    {
+                        "forceInput": True,
+                        "tooltip": "Connect Prompt Enhancer's wh_ratio output.",
+                    },
+                ),
+                "megapixels": (
+                    "FLOAT",
+                    {
+                        "default": 1.0,
+                        "min": 0.1,
+                        "max": 16.0,
+                        "step": 0.1,
+                        "tooltip": "Target pixel budget; 1.0 MP is about 1024×1024 at 1:1.",
+                    },
+                ),
+                "multiple": (
+                    "INT",
+                    {
+                        "default": 8,
+                        "min": 8,
+                        "max": 128,
+                        "step": 8,
+                        "tooltip": "Round width and height to this generation-compatible multiple.",
+                    },
+                ),
+            }
+        }
+
+    def select(self, wh_ratio: str, megapixels: float = 1.0, multiple: int = 8):
+        return prompt_rewrite_dimensions(wh_ratio, megapixels=megapixels, multiple=multiple)
+
+
 class LlamaWorkbenchChatSettings:
     CATEGORY = "Llama Workbench / Chat"
     RETURN_TYPES = (SETTINGS_TYPE,)
@@ -1191,6 +1237,7 @@ NODE_CLASS_MAPPINGS = {
     "LlamaWorkbench_ReleaseEmbedded": LlamaWorkbenchReleaseEmbedded,
     "LlamaWorkbench_Prompt": LlamaWorkbenchPrompt,
     "LlamaWorkbench_PromptEnhancer": LlamaWorkbenchPromptEnhancer,
+    "LlamaWorkbench_QwenImage21PEResolution": LlamaWorkbenchQwenImage21PEResolution,
     "LlamaWorkbench_ChatSettings": LlamaWorkbenchChatSettings,
     "LlamaWorkbench_SkillLoader": LlamaWorkbenchSkillLoader,
     "LlamaWorkbench_Chat": LlamaWorkbenchChat,
@@ -1207,6 +1254,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LlamaWorkbench_ReleaseEmbedded": "Llama Workbench Release Embedded Model",
     "LlamaWorkbench_Prompt": "Llama Workbench Prompt / Image2Prompt",
     "LlamaWorkbench_PromptEnhancer": "Llama Workbench Qwen Image 2.1 Prompt Enhancer",
+    "LlamaWorkbench_QwenImage21PEResolution": "Llama Workbench Qwen Image 2.1 PE Resolution",
     "LlamaWorkbench_ChatSettings": "Llama Workbench Chat Settings",
     "LlamaWorkbench_SkillLoader": "Llama Workbench Skill Loader",
     "LlamaWorkbench_Chat": "Llama Workbench Chat",

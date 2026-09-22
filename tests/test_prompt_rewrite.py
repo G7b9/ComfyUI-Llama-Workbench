@@ -5,13 +5,18 @@ import json
 import pytest
 
 from lwb.backend import ChatResponse
-from lwb.nodes import LlamaWorkbenchPromptEnhancer, NODE_CLASS_MAPPINGS
+from lwb.nodes import (
+    LlamaWorkbenchPromptEnhancer,
+    LlamaWorkbenchQwenImage21PEResolution,
+    NODE_CLASS_MAPPINGS,
+)
 from lwb.prompt_rewrite import (
     PROMPT_REWRITE_PROFILES,
     PromptRewriteFormatError,
     build_prompt_rewrite_messages,
     load_system_prompt,
     parse_prompt_rewrite_json,
+    prompt_rewrite_dimensions,
     rewrite_prompt,
 )
 
@@ -178,3 +183,26 @@ def test_prompt_enhancer_node_is_registered_and_returns_separate_fields():
         "wh_ratio": "1:1",
         "ratio_follow": "",
     }
+
+
+def test_prompt_rewrite_dimensions_preserve_ratio_and_pixel_budget():
+    width, height, ratio = prompt_rewrite_dimensions("16:9", megapixels=1.0, multiple=8)
+
+    assert (width, height, ratio) == (1368, 768, "16:9")
+    assert width % 8 == height % 8 == 0
+    assert width * height == pytest.approx(1024 * 1024, rel=0.02)
+    assert prompt_rewrite_dimensions("1920:1080")[2] == "16:9"
+
+
+@pytest.mark.parametrize("ratio", ["", "auto", "0:1", "16/9"])
+def test_prompt_rewrite_dimensions_reject_invalid_ratios(ratio):
+    with pytest.raises(ValueError, match="positive W:H"):
+        prompt_rewrite_dimensions(ratio)
+
+
+def test_qwen_pe_resolution_node_is_registered_and_uses_force_input():
+    inputs = LlamaWorkbenchQwenImage21PEResolution.INPUT_TYPES()["required"]
+
+    assert NODE_CLASS_MAPPINGS["LlamaWorkbench_QwenImage21PEResolution"] is LlamaWorkbenchQwenImage21PEResolution
+    assert inputs["wh_ratio"][1]["forceInput"] is True
+    assert LlamaWorkbenchQwenImage21PEResolution().select("1:1") == (1024, 1024, "1:1")

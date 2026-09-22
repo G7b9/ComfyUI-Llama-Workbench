@@ -10,7 +10,7 @@ placeholder model paths before queuing.
 | `02_existing-server-image-to-prompt.json` | Attach to an existing VLM server and reverse an image into a prompt | Enter the endpoint and connect images one by one (the next socket appears automatically) or use IMAGE batches. Set `max_images` (1–10); `max_image_edge=0` keeps the original resolution. |
 | `03_skill-chat.json` | Multi-turn chat with the bundled `prompt-refiner` Skill and the separate Chat output display | Connect to a running local server, enter a Message, then queue the prompt. The display receives `thinking` and `assistant_message` independently. |
 | `04_embedded-qwen-gemma-vlm.json` | Embedded Qwen/Gemma VLM image-to-prompt | Install `llama-cpp-python`; set matching model and mmproj paths. |
-| `05_qwen-image-2.1-pe-t2i-gguf.json` | Start a local Qwen-Image-2.1 PE-T2I GGUF and return strict structured prompt-enhancer fields | Set the GGUF, `llama-server`, and local matching `system_prompt.txt` paths. The workflow includes no model or official prompt asset. |
+| `05_qwen-image-2.1-pe-t2i-gguf.json` | End-to-end PE-T2I GGUF → native Qwen-Image-2.1 generation → saved image | Set the PE GGUF, `llama-server`, and local matching `system_prompt.txt` paths. Install the diffusion model, text encoder, and VAE selected in the loader nodes. The PE server auto-unloads before sampling. The workflow includes no model or official prompt asset. |
 
 The sample model and binary paths are generic placeholders, not bundled files.
 The server and ComfyUI process must both be able to access the paths you enter.
