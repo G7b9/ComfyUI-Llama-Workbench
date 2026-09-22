@@ -121,6 +121,12 @@ def test_qwen_prompt_enhancer_example_is_an_end_to_end_generation_workflow():
     assert enhancer_values["max_images"] == 10
     assert enhancer_values["auto_unload"] is True
 
+    resolution = next(
+        node for node in nodes.values() if node["type"] == "LlamaWorkbench_QwenImage21PEResolution"
+    )
+    resolution_values, _ = _serialized_workbench_widgets(resolution)
+    assert resolution_values["aspect_ratio_override"] == "Auto (use Prompt Enhancer)"
+
     links = {(nodes[source]["type"], source_slot, nodes[target]["type"], target_slot) for _, source, source_slot, target, target_slot, _ in payload["links"]}
     assert ("LlamaWorkbench_PromptEnhancer", 0, "TextEncodeQwenImage21", 3) in links
     assert ("LlamaWorkbench_PromptEnhancer", 1, "LlamaWorkbench_QwenImage21PEResolution", 0) in links

@@ -20,6 +20,24 @@ from typing import Any, Iterable
 
 MAX_PROMPT_REWRITE_IMAGES = 10
 MAX_SYSTEM_PROMPT_BYTES = 1024 * 1024
+PROMPT_REWRITE_AUTO_ASPECT_RATIO = "Auto (use Prompt Enhancer)"
+QWEN_IMAGE_21_ASPECT_RATIOS = (
+    "1:1",
+    "3:2",
+    "2:3",
+    "4:3",
+    "3:4",
+    "5:4",
+    "4:5",
+    "16:9",
+    "9:16",
+    "2:1",
+    "1:2",
+    "21:9",
+    "9:21",
+    "3:1",
+    "1:3",
+)
 _THINK_BLOCK = re.compile(r"<think>\s*(.*?)\s*</think>", re.IGNORECASE | re.DOTALL)
 _RATIO = re.compile(r"^([1-9]\d*):([1-9]\d*)$")
 _IMAGE_REFERENCE = re.compile(r"^<image([1-9]\d*)>$")
@@ -119,6 +137,7 @@ def prompt_rewrite_dimensions(
     *,
     megapixels: float = 1.0,
     multiple: int = 8,
+    aspect_ratio_override: str = PROMPT_REWRITE_AUTO_ASPECT_RATIO,
 ) -> tuple[int, int, str]:
     """Convert a PE ``wh_ratio`` into generation dimensions.
 
@@ -127,7 +146,10 @@ def prompt_rewrite_dimensions(
     budget while preserving the model-selected composition.
     """
 
+    override = str(aspect_ratio_override or "").strip()
     ratio = str(wh_ratio or "").strip()
+    if override and override != PROMPT_REWRITE_AUTO_ASPECT_RATIO:
+        ratio = override
     match = _RATIO.fullmatch(ratio)
     if not match:
         raise ValueError("wh_ratio must be a positive W:H integer ratio")

@@ -13,7 +13,13 @@ from .backend import EmbeddedBackend, ServerBackend, backend_descriptor, make_te
 from .embedded import EMBEDDED_MODELS, create_embedded_backend
 from .media import image_tensor_to_data_urls
 from .process import OWNED_SERVER, ServerLaunchConfig
-from .prompt_rewrite import MAX_PROMPT_REWRITE_IMAGES, prompt_rewrite_dimensions, rewrite_prompt
+from .prompt_rewrite import (
+    MAX_PROMPT_REWRITE_IMAGES,
+    PROMPT_REWRITE_AUTO_ASPECT_RATIO,
+    QWEN_IMAGE_21_ASPECT_RATIOS,
+    prompt_rewrite_dimensions,
+    rewrite_prompt,
+)
 from .skills import (
     Skill,
     build_skill_instruction,
@@ -883,11 +889,29 @@ class LlamaWorkbenchQwenImage21PEResolution:
                         "tooltip": "Round width and height to this generation-compatible multiple.",
                     },
                 ),
+                "aspect_ratio_override": (
+                    [PROMPT_REWRITE_AUTO_ASPECT_RATIO, *QWEN_IMAGE_21_ASPECT_RATIOS],
+                    {
+                        "default": PROMPT_REWRITE_AUTO_ASPECT_RATIO,
+                        "tooltip": "Auto uses the connected PE wh_ratio; a concrete ratio overrides it.",
+                    },
+                ),
             }
         }
 
-    def select(self, wh_ratio: str, megapixels: float = 1.0, multiple: int = 8):
-        return prompt_rewrite_dimensions(wh_ratio, megapixels=megapixels, multiple=multiple)
+    def select(
+        self,
+        wh_ratio: str,
+        megapixels: float = 1.0,
+        multiple: int = 8,
+        aspect_ratio_override: str = PROMPT_REWRITE_AUTO_ASPECT_RATIO,
+    ):
+        return prompt_rewrite_dimensions(
+            wh_ratio,
+            megapixels=megapixels,
+            multiple=multiple,
+            aspect_ratio_override=aspect_ratio_override,
+        )
 
 
 class LlamaWorkbenchChatSettings:

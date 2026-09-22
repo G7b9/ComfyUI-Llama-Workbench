@@ -99,7 +99,8 @@
       "inputs": [
         {"name": "wh_ratio", "type": "STRING", "link": 3},
         {"name": "megapixels", "type": "FLOAT", "widget": {"name": "megapixels"}, "link": null},
-        {"name": "multiple", "type": "INT", "widget": {"name": "multiple"}, "link": null}
+        {"name": "multiple", "type": "INT", "widget": {"name": "multiple"}, "link": null},
+        {"name": "aspect_ratio_override", "type": "COMBO", "widget": {"name": "aspect_ratio_override"}, "link": null}
       ],
       "outputs": [
         {"name": "width", "type": "INT", "links": [4]},
@@ -107,7 +108,7 @@
         {"name": "normalized_ratio", "type": "STRING", "links": null}
       ],
       "properties": {"Node name for S&R": "LlamaWorkbench_QwenImage21PEResolution"},
-      "widgets_values": [1.0, 8]
+      "widgets_values": [1.0, 8, "Auto (use Prompt Enhancer)"]
     },
     {
       "id": 4,
