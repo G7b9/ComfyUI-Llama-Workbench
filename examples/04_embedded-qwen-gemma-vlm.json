@@ -1,0 +1,110 @@
+{
+  "id": "73524680-8fae-4709-875a-167d1fabc104",
+  "revision": 0,
+  "last_node_id": 3,
+  "last_link_id": 2,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LlamaWorkbench_EmbeddedModel",
+      "pos": [40, 70],
+      "size": [400, 420],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {"name": "model_path", "type": "STRING", "widget": {"name": "model_path"}, "link": null},
+        {"name": "family", "type": "COMBO", "widget": {"name": "family"}, "link": null},
+        {"name": "context_size", "type": "INT", "widget": {"name": "context_size"}, "link": null},
+        {"name": "gpu_layers", "type": "INT", "widget": {"name": "gpu_layers"}, "link": null},
+        {"name": "cache_type_k", "type": "COMBO", "widget": {"name": "cache_type_k"}, "link": null},
+        {"name": "cache_type_v", "type": "COMBO", "widget": {"name": "cache_type_v"}, "link": null},
+        {"name": "cpu_moe", "type": "BOOLEAN", "widget": {"name": "cpu_moe"}, "link": null},
+        {"name": "n_cpu_moe", "type": "INT", "widget": {"name": "n_cpu_moe"}, "link": null},
+        {"name": "mmproj_path", "type": "STRING", "widget": {"name": "mmproj_path"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "backend", "type": "LLAMA_WORKBENCH_BACKEND", "links": [1]},
+        {"name": "diagnostics", "type": "STRING", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LlamaWorkbench_EmbeddedModel"},
+      "widgets_values": [
+        "/path/to/your-qwen-or-gemma.gguf",
+        "qwen3.6-vl",
+        8192,
+        -1,
+        "q8_0",
+        "q8_0",
+        false,
+        0,
+        "/path/to/your-mmproj.gguf"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "LoadImage",
+      "pos": [40, 560],
+      "size": [320, 300],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [2]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["", "image"]
+    },
+    {
+      "id": 3,
+      "type": "LlamaWorkbench_Prompt",
+      "pos": [510, 120],
+      "size": [450, 470],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {"name": "backend", "type": "LLAMA_WORKBENCH_BACKEND", "link": 1},
+        {"name": "prompt", "type": "STRING", "widget": {"name": "prompt"}, "link": null},
+        {"name": "system_prompt", "type": "STRING", "widget": {"name": "system_prompt"}, "link": null},
+        {"name": "max_tokens", "type": "INT", "widget": {"name": "max_tokens"}, "link": null},
+        {"name": "temperature", "type": "FLOAT", "widget": {"name": "temperature"}, "link": null},
+        {"name": "top_p", "type": "FLOAT", "widget": {"name": "top_p"}, "link": null},
+        {"name": "top_k", "type": "INT", "widget": {"name": "top_k"}, "link": null},
+        {"name": "thinking", "type": "COMBO", "widget": {"name": "thinking"}, "link": null},
+        {"name": "seed", "type": "INT", "widget": {"name": "seed"}, "link": null},
+        {"name": "max_images", "type": "INT", "widget": {"name": "max_images"}, "link": null},
+        {"name": "max_image_edge", "type": "INT", "widget": {"name": "max_image_edge"}, "link": null},
+        {"name": "auto_unload", "type": "BOOLEAN", "widget": {"name": "auto_unload"}, "link": null},
+        {"name": "image", "type": "IMAGE", "link": 2}
+      ],
+      "outputs": [
+        {"name": "response", "type": "STRING", "links": null},
+        {"name": "backend_info", "type": "STRING", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LlamaWorkbench_Prompt"},
+      "widgets_values": [
+        "Describe this image in detail for prompt inversion. Include subject, composition, visual style, lighting and camera language.",
+        "Answer accurately and concisely.",
+        -1,
+        0.2,
+        0.9,
+        40,
+        "off",
+        -1,
+        8,
+        0,
+        false
+      ]
+    }
+  ],
+  "links": [[1, 1, 0, 3, 0, "LLAMA_WORKBENCH_BACKEND"], [2, 2, 0, 3, 12, "IMAGE"]],
+  "groups": [],
+  "config": {},
+  "extra": {"lwb_example": {"name": "embedded-qwen-gemma-vlm", "note": "Install llama-cpp-python and replace model/mmproj paths with a matching pair."}},
+  "version": 0.4
+}

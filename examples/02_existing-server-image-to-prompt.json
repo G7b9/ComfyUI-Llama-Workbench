@@ -1,0 +1,95 @@
+{
+  "id": "73524680-8fae-4709-875a-167d1fabc102",
+  "revision": 0,
+  "last_node_id": 3,
+  "last_link_id": 2,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LlamaWorkbench_Connection",
+      "pos": [40, 70],
+      "size": [360, 230],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {"name": "server_url", "type": "STRING", "widget": {"name": "server_url"}, "link": null},
+        {"name": "model_name", "type": "STRING", "widget": {"name": "model_name"}, "link": null},
+        {"name": "api_key_env", "type": "STRING", "widget": {"name": "api_key_env"}, "link": null},
+        {"name": "timeout_seconds", "type": "FLOAT", "widget": {"name": "timeout_seconds"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "backend", "type": "LLAMA_WORKBENCH_BACKEND", "links": [1]},
+        {"name": "connection", "type": "STRING", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LlamaWorkbench_Connection"},
+      "widgets_values": ["http://127.0.0.1:8080", "", "", 120.0]
+    },
+    {
+      "id": 2,
+      "type": "LoadImage",
+      "pos": [40, 380],
+      "size": [320, 300],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [2]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["", "image"]
+    },
+    {
+      "id": 3,
+      "type": "LlamaWorkbench_Prompt",
+      "pos": [480, 120],
+      "size": [450, 470],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {"name": "backend", "type": "LLAMA_WORKBENCH_BACKEND", "link": 1},
+        {"name": "prompt", "type": "STRING", "widget": {"name": "prompt"}, "link": null},
+        {"name": "system_prompt", "type": "STRING", "widget": {"name": "system_prompt"}, "link": null},
+        {"name": "max_tokens", "type": "INT", "widget": {"name": "max_tokens"}, "link": null},
+        {"name": "temperature", "type": "FLOAT", "widget": {"name": "temperature"}, "link": null},
+        {"name": "top_p", "type": "FLOAT", "widget": {"name": "top_p"}, "link": null},
+        {"name": "top_k", "type": "INT", "widget": {"name": "top_k"}, "link": null},
+        {"name": "thinking", "type": "COMBO", "widget": {"name": "thinking"}, "link": null},
+        {"name": "seed", "type": "INT", "widget": {"name": "seed"}, "link": null},
+        {"name": "max_images", "type": "INT", "widget": {"name": "max_images"}, "link": null},
+        {"name": "max_image_edge", "type": "INT", "widget": {"name": "max_image_edge"}, "link": null},
+        {"name": "auto_unload", "type": "BOOLEAN", "widget": {"name": "auto_unload"}, "link": null},
+        {"name": "image", "type": "IMAGE", "link": 2}
+      ],
+      "outputs": [
+        {"name": "response", "type": "STRING", "links": null},
+        {"name": "backend_info", "type": "STRING", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LlamaWorkbench_Prompt"},
+      "widgets_values": [
+        "Write one accurate, detailed image-generation prompt that recreates this image. Mention subject, composition, lighting, camera, visual style and visible text. Output only the prompt.",
+        "You are an expert visual prompt writer.",
+        -1,
+        0.2,
+        0.9,
+        40,
+        "off",
+        -1,
+        8,
+        0,
+        false
+      ]
+    }
+  ],
+  "links": [[1, 1, 0, 3, 0, "LLAMA_WORKBENCH_BACKEND"], [2, 2, 0, 3, 12, "IMAGE"]],
+  "groups": [],
+  "config": {},
+  "extra": {"lwb_example": {"name": "existing-server-image-to-prompt", "note": "Choose an image and connect to an already-running VLM-capable server."}},
+  "version": 0.4
+}
