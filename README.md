@@ -18,6 +18,8 @@ other packages:
 - Attach to another local OpenAI-compatible `llama-server` without assuming
   ownership of it.
 - Generate text or image-to-prompt results through either backend.
+- Run Qwen-Image-2.1 Prompt Enhancer checkpoints through the same backend,
+  with official task sampling profiles and strict structured outputs.
 - Optionally load Qwen/Gemma-style local models through `llama-cpp-python`,
   including common multimodal chat handlers, KV q8_0 cache choices, and Qwen
   MoE CPU options when the installed binding supports them.
@@ -74,17 +76,19 @@ long reasoning or unlimited-token responses.
 | Llama Workbench H3 Auto Resolution Selector | Matches an input image to the nearest MiniMax H3 supported aspect ratio, then calculates compatible width and height at a target megapixel count. |
 | Llama Workbench Embedded VL Model | Optional direct `llama-cpp-python` loader for Qwen/Gemma-style models. |
 | Llama Workbench Release Embedded Model | Closes an embedded model explicitly. |
-| Llama Workbench Prompt / Image2Prompt | Text prompting and image-to-prompt from a unified backend socket. Its image socket grows from `image` to `image1`, `image2`, and so on as connections are added (up to 8). It also has `seed`, `max_images`, `max_image_edge`, `auto_unload`, and a `thinking` control that defaults to `off`. |
-| Llama Workbench Chat | Interactive local chat: enter text and click its on-node **发送** button to queue only this Chat node and its upstream dependencies (no Queue Prompt click); it starts at a practical default size, remains freely resizable, and keeps long history in a scrollable canvas viewport. `clear_context_before_run` defaults to on, so every queued workflow starts fresh; turn it off for a continuing multi-turn conversation. `use_cache` defaults to on and reuses an unchanged complete request independently of `seed`; turn it off to force a fresh model request. While it is on, `release_comfy_cache_after_run` is skipped so the response remains reusable. `release_owned_server_after_run` defaults to on and stops an owned llama-server immediately after Chat responds, before downstream H3/video nodes allocate VRAM. **清空上下文** / **清空输入** actions and a text-token context meter are included. Start Server supplies the meter's `context_size` automatically; set `context_size` on an external Connection to obtain a percentage. Graph-persisted history, direct `max_tokens` / `seed` / `thinking` / `auto_unload` controls, and dynamic image sockets (up to 8) with `max_image_edge` are also included. |
+| Llama Workbench Prompt / Image2Prompt | Text prompting and image-to-prompt from a unified backend socket. Its image socket grows from `image` to `image1`, `image2`, and so on as connections are added (up to 10). It also has `seed`, `max_images`, `max_image_edge`, `auto_unload`, and a `thinking` control that defaults to `off`. |
+| Llama Workbench Qwen Image 2.1 Prompt Enhancer | Native structured prompt rewriting over a Workbench backend. It uses the official T2I/edit sampling profiles, forces thinking on, strictly returns `rewritten_prompt`, `wh_ratio`, and `ratio_follow`, and retries one malformed response once. The matching System Prompt must be pasted or loaded from a local file. |
+| Llama Workbench Chat | Interactive local chat: enter text and click its on-node **发送** button to queue only this Chat node and its upstream dependencies (no Queue Prompt click); it starts at a practical default size, remains freely resizable, and keeps long history in a scrollable canvas viewport. `clear_context_before_run` defaults to on, so every queued workflow starts fresh; turn it off for a continuing multi-turn conversation. `use_cache` defaults to on and reuses an unchanged complete request independently of `seed`; turn it off to force a fresh model request. While it is on, `release_comfy_cache_after_run` is skipped so the response remains reusable. `release_owned_server_after_run` defaults to on and stops an owned llama-server immediately after Chat responds, before downstream H3/video nodes allocate VRAM. **清空上下文** / **清空输入** actions and a text-token context meter are included. Start Server supplies the meter's `context_size` automatically; set `context_size` on an external Connection to obtain a percentage. Graph-persisted history, direct `max_tokens` / `seed` / `thinking` / `auto_unload` controls, and dynamic image sockets (up to 10) with `max_image_edge` are also included. |
 | Llama Workbench Chat Output Display | Canvas-only terminal viewer that separately previews a Chat node's `thinking` and `assistant_message` outputs. |
 | Llama Workbench Chat Settings | System prompt, sampling, context-history, and image-size controls. |
 | Llama Workbench Skill Loader | Loads one package-local Skill, Auto selection, or normal chat. |
 
 ## Importable workflows
 
-Four ready-to-import workflow JSON files are included in
+Five ready-to-import workflow JSON files are included in
 [`examples/`](examples/README.md): owned-server chat, attached-server
-image-to-prompt, Skill chat, and embedded Qwen/Gemma VLM image-to-prompt.
+image-to-prompt, Skill chat, embedded Qwen/Gemma VLM image-to-prompt, and Qwen
+Image 2.1 PE-T2I GGUF prompt rewriting.
 Replace their generic model and binary placeholders with paths that are visible
 to the host running ComfyUI.
 
@@ -93,7 +97,7 @@ interprets as unlimited generation. It still stops on EOS or when the model's
 context handling ends the request; use a positive limit when you need bounded
 latency or output size.
 
-Prompt / Image2Prompt supports up to eight image references. Connect the first
+Prompt / Image2Prompt supports up to ten image references. Connect the first
 image to `image`; it is renamed to `image1` and a new `image2` socket appears.
 Each further connection exposes the next socket, while unused trailing sockets
 are removed. An `IMAGE` batch is also accepted at every socket. `max_images`
@@ -113,11 +117,45 @@ on every queued run, so an auto-unloaded owned model is loaded again next time.
 
 The same dynamic image inputs are available on **Llama Workbench Chat**. Connect
 its `image` socket to create `image2`; each additional connection exposes the
-next socket, up to 8 images. `max_images` is the combined cap for all connected
+next socket, up to 10 images. `max_images` is the combined cap for all connected
 sockets and IMAGE batches.
 
 Chat does not impose H3-specific image-socket roles. The selected Skill and
 the user's request determine how connected images are interpreted.
+
+## Qwen-Image-2.1 Prompt Enhancer
+
+Use **Llama Workbench Start Server** with a compatible `llama-server` and local
+GGUF, then connect its backend to **Llama Workbench Qwen Image 2.1 Prompt
+Enhancer**. Phase-one testing targets
+[`pottokao/Qwen-Image-2.1-PE-T2I-Heretic-GGUF`](https://huggingface.co/pottokao/Qwen-Image-2.1-PE-T2I-Heretic-GGUF).
+Select `t2i`, leave all image sockets disconnected, and provide the matching
+Qwen PE System Prompt through exactly one of:
+
+- `system_prompt`: paste the prompt into the node.
+- `system_prompt_path`: point to a local UTF-8 `system_prompt.txt`, or to the
+  local model directory that contains that file.
+
+The repository intentionally includes neither Qwen's official System Prompt
+nor the model weights. They remain governed by their upstream license and are
+not MIT assets from this project.
+
+The node owns the PE request contract rather than asking users to copy sampling
+values into a generic Prompt node. Its `t2i` profile sends `temperature=1.0`,
+`top_p=0.95`, `top_k=20`, `min_p=0`, `presence_penalty=1.5`,
+`max_tokens=16256`, and `enable_thinking=true`. It parses exactly one JSON
+object—no Markdown fences, prose, repaired JSON, aliases, or unknown fields—and
+exposes `rewritten_prompt`, `wh_ratio`, and the normalized empty
+`ratio_follow` as separate sockets plus `result_json`. A formatting failure
+gets one corrective retry; a second failure stops the workflow with an error
+instead of silently passing unreliable text downstream.
+
+The `edit` profile and ordered `image1`…`image10` transport are already exposed
+for the later PE-I2I path. It uses the official edit sampling differences
+(`presence_penalty=0`, `max_tokens=24000`) and requires at least one image. Use
+it only with the matching PE-I2I checkpoint, System Prompt, and multimodal
+projector supplied through Start Server's `mmproj_path`; those assets are not
+bundled or auto-downloaded.
 
 ## H3-compatible automatic resolution
 

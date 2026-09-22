@@ -174,7 +174,16 @@ class ServerBackend:
         if self.ensure_available is not None:
             self.ensure_available()
         body: dict[str, Any] = {"messages": messages, "stream": False}
-        for key in ("max_tokens", "temperature", "top_p", "top_k", "repeat_penalty", "seed"):
+        for key in (
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "top_k",
+            "min_p",
+            "presence_penalty",
+            "repeat_penalty",
+            "seed",
+        ):
             value = settings.get(key)
             if value is not None:
                 body[key] = value
@@ -279,7 +288,16 @@ class EmbeddedBackend:
                 self.llm = active.llm
                 self._active_backend = active
         kwargs: dict[str, Any] = {"messages": messages, "stream": False}
-        for key in ("max_tokens", "temperature", "top_p", "top_k", "repeat_penalty", "seed"):
+        for key in (
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "top_k",
+            "min_p",
+            "presence_penalty",
+            "repeat_penalty",
+            "seed",
+        ):
             value = settings.get(key)
             if value is not None:
                 kwargs[key] = value

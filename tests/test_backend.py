@@ -40,12 +40,19 @@ def test_server_backend_posts_openai_chat_payload():
     session = FakeSession()
     backend._session = session
     result = backend.chat(
-        [{"role": "user", "content": "hello"}], max_tokens=-1, temperature=0.2, enable_thinking=False
+        [{"role": "user", "content": "hello"}],
+        max_tokens=-1,
+        temperature=0.2,
+        min_p=0.05,
+        presence_penalty=1.5,
+        enable_thinking=False,
     )
     assert result == "local answer"
     assert session.calls[0][0].endswith("/v1/chat/completions")
     assert session.calls[0][1]["json"]["max_tokens"] == -1
     assert session.calls[0][1]["json"]["model"] == "qwen-router-id"
+    assert session.calls[0][1]["json"]["min_p"] == 0.05
+    assert session.calls[0][1]["json"]["presence_penalty"] == 1.5
     assert session.calls[0][1]["json"]["chat_template_kwargs"] == {"enable_thinking": False}
 
 

@@ -13,6 +13,7 @@ from .backend import EmbeddedBackend, ServerBackend, backend_descriptor, make_te
 from .embedded import EMBEDDED_MODELS, create_embedded_backend
 from .media import image_tensor_to_data_urls
 from .process import OWNED_SERVER, ServerLaunchConfig
+from .prompt_rewrite import MAX_PROMPT_REWRITE_IMAGES, rewrite_prompt
 from .skills import (
     Skill,
     build_skill_instruction,
@@ -28,6 +29,7 @@ from .skills import (
 BACKEND_TYPE = "LLAMA_WORKBENCH_BACKEND"
 SETTINGS_TYPE = "LLAMA_WORKBENCH_CHAT_SETTINGS"
 SKILL_TYPE = "LLAMA_WORKBENCH_SKILL"
+DYNAMIC_IMAGE_LIMIT = 10
 _THINKING_BLOCK = re.compile(r"<(?:think|thinking)>\s*(.*?)\s*</(?:think|thinking)>", re.IGNORECASE | re.DOTALL)
 _UNCLOSED_THINKING_BLOCK = re.compile(r"^\s*<(?:think|thinking)>\s*(.*)$", re.IGNORECASE | re.DOTALL)
 _THINKING_HEADING = re.compile(
@@ -588,8 +590,8 @@ class LlamaWorkbenchPrompt:
         images = {
             "image": ("IMAGE", {"tooltip": "Legacy image socket; it becomes image1 after connection."}),
             **{
-                f"image{index}": ("IMAGE", {"tooltip": f"Image {index}; dynamic image sockets support up to 8 images."})
-                for index in range(1, 9)
+                f"image{index}": ("IMAGE", {"tooltip": f"Image {index}; dynamic image sockets support up to 10 images."})
+                for index in range(1, DYNAMIC_IMAGE_LIMIT + 1)
             },
         }
         return {
@@ -611,7 +613,7 @@ class LlamaWorkbenchPrompt:
                 "top_k": ("INT", {"default": 40, "min": 0, "max": 200}),
                 "thinking": (["off", "auto", "on"], {"default": "off", "tooltip": "Use off for direct image-to-prompt output."}),
                 "seed": ("INT", {"default": -1, "min": -1, "max": 0x7FFFFFFF, "control_after_generate": True}),
-                "max_images": ("INT", {"default": 8, "min": 1, "max": 8, "tooltip": "Maximum total images sent from dynamic sockets and IMAGE batches."}),
+                "max_images": ("INT", {"default": 10, "min": 1, "max": 10, "tooltip": "Maximum total images sent from dynamic sockets and IMAGE batches."}),
                 "max_image_edge": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 64, "tooltip": "0 preserves input resolution; a positive limit downsizes images before sending."}),
                 "auto_unload": ("BOOLEAN", {"default": False, "tooltip": "After generation, unload an embedded model or stop a Start Server-owned llama-server. Attached Connection servers are never stopped."}),
             },
@@ -629,7 +631,7 @@ class LlamaWorkbenchPrompt:
         top_k,
         thinking="off",
         seed=-1,
-        max_images=8,
+        max_images=10,
         max_image_edge=0,
         auto_unload=False,
         image=None,
@@ -641,11 +643,25 @@ class LlamaWorkbenchPrompt:
         image6=None,
         image7=None,
         image8=None,
+        image9=None,
+        image10=None,
     ):
-        image_limit = min(8, _safe_int(max_images, 8, 1))
+        image_limit = min(DYNAMIC_IMAGE_LIMIT, _safe_int(max_images, DYNAMIC_IMAGE_LIMIT, 1))
         image_edge = _safe_int(max_image_edge, 0, 0)
         images: list[str] = []
-        for supplied in (image, image1, image2, image3, image4, image5, image6, image7, image8):
+        for supplied in (
+            image,
+            image1,
+            image2,
+            image3,
+            image4,
+            image5,
+            image6,
+            image7,
+            image8,
+            image9,
+            image10,
+        ):
             remaining = image_limit - len(images)
             if supplied is None or remaining <= 0:
                 continue
@@ -669,6 +685,163 @@ class LlamaWorkbenchPrompt:
         finally:
             _auto_unload_backend(backend, auto_unload)
         return response, backend_descriptor(backend)
+
+
+class LlamaWorkbenchPromptEnhancer:
+    """Qwen-Image-2.1 PE with strict, separately wired output fields."""
+
+    CATEGORY = "Llama Workbench / Generation"
+    OUTPUT_NODE = True
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = (
+        "rewritten_prompt",
+        "wh_ratio",
+        "ratio_follow",
+        "result_json",
+        "thinking",
+        "backend_info",
+    )
+    FUNCTION = "enhance"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        images = {
+            "image": ("IMAGE", {"tooltip": "First PE-I2I source image; connecting it reveals image2."}),
+            **{
+                f"image{index}": (
+                    "IMAGE",
+                    {"tooltip": f"PE-I2I source image {index}; inputs preserve image1..image10 order."},
+                )
+                for index in range(1, MAX_PROMPT_REWRITE_IMAGES + 1)
+            },
+        }
+        return {
+            "required": {
+                "backend": (BACKEND_TYPE,),
+                "prompt": ("STRING", {"default": "", "multiline": True, "placeholder": "Short image prompt to enhance"}),
+                "task": (
+                    ["t2i", "edit"],
+                    {
+                        "default": "t2i",
+                        "tooltip": "t2i targets PE-T2I. edit is the prepared PE-I2I path and requires a matching model plus mmproj.",
+                    },
+                ),
+                "system_prompt": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": True,
+                        "placeholder": "Paste the matching Qwen PE system prompt, or use system_prompt_path",
+                    },
+                ),
+                "system_prompt_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "placeholder": "local system_prompt.txt or its containing directory",
+                    },
+                ),
+                "seed": ("INT", {"default": 42, "min": -1, "max": 0x7FFFFFFF, "control_after_generate": True}),
+                "max_images": (
+                    "INT",
+                    {
+                        "default": 10,
+                        "min": 1,
+                        "max": 10,
+                        "tooltip": "Prepared for Qwen-Image-2.1 PE-I2I; t2i rejects connected images.",
+                    },
+                ),
+                "max_image_edge": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 8192,
+                        "step": 64,
+                        "tooltip": "0 preserves input resolution; a positive limit downsizes PE-I2I images before sending.",
+                    },
+                ),
+                "auto_unload": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": "Release a Workbench-owned backend after the enhancement request and its possible format retry.",
+                    },
+                ),
+            },
+            "optional": images,
+        }
+
+    def enhance(
+        self,
+        backend,
+        prompt,
+        task,
+        system_prompt,
+        system_prompt_path,
+        seed=42,
+        max_images=10,
+        max_image_edge=0,
+        auto_unload=False,
+        image=None,
+        image1=None,
+        image2=None,
+        image3=None,
+        image4=None,
+        image5=None,
+        image6=None,
+        image7=None,
+        image8=None,
+        image9=None,
+        image10=None,
+    ):
+        image_limit = min(MAX_PROMPT_REWRITE_IMAGES, _safe_int(max_images, 10, 1))
+        image_edge = _safe_int(max_image_edge, 0, 0)
+        image_urls: list[str] = []
+        for supplied in (
+            image,
+            image1,
+            image2,
+            image3,
+            image4,
+            image5,
+            image6,
+            image7,
+            image8,
+            image9,
+            image10,
+        ):
+            remaining = image_limit - len(image_urls)
+            if supplied is None or remaining <= 0:
+                continue
+            image_urls.extend(image_tensor_to_data_urls(supplied, max_images=remaining, max_edge=image_edge))
+        try:
+            result = rewrite_prompt(
+                backend,
+                str(prompt),
+                task=str(task),
+                system_prompt=str(system_prompt),
+                system_prompt_path=str(system_prompt_path),
+                image_data_urls=image_urls,
+                seed=_safe_int(seed, 42, -1),
+            )
+        finally:
+            _auto_unload_backend(backend, auto_unload)
+        result_json = result.as_json()
+        ui = {
+            "result_json": [result_json],
+            "rewritten_prompt": [result.rewritten_prompt],
+            "retried": [result.retried],
+        }
+        outputs = (
+            result.rewritten_prompt,
+            result.wh_ratio,
+            result.ratio_follow,
+            result_json,
+            result.thinking,
+            backend_descriptor(backend),
+        )
+        return {"ui": ui, "result": outputs}
 
 
 class LlamaWorkbenchChatSettings:
@@ -733,10 +906,10 @@ class LlamaWorkbenchChat:
     @classmethod
     def INPUT_TYPES(cls):
         images = {
-            "image": ("IMAGE", {"tooltip": "First image; connecting it reveals image2. Dynamic image sockets support up to 8 images."}),
+            "image": ("IMAGE", {"tooltip": "First image; connecting it reveals image2. Dynamic image sockets support up to 10 images."}),
             **{
-                f"image{index}": ("IMAGE", {"tooltip": f"Image {index}; dynamic image sockets support up to 8 images."})
-                for index in range(1, 9)
+                f"image{index}": ("IMAGE", {"tooltip": f"Image {index}; dynamic image sockets support up to 10 images."})
+                for index in range(1, DYNAMIC_IMAGE_LIMIT + 1)
             },
         }
         return {
@@ -764,7 +937,7 @@ class LlamaWorkbenchChat:
                 "seed": ("INT", {"default": -1, "min": -1, "max": 0x7FFFFFFF, "control_after_generate": True}),
                 "use_cache": ("BOOLEAN", {"default": True, "tooltip": "Default on: reuse the result for an unchanged complete request. This is independent of seed; turn off to force a fresh model request."}),
                 "thinking": (["off", "auto", "on"], {"default": "off", "tooltip": "off suppresses supported reasoning-model thinking output; auto leaves the model template unchanged."}),
-                "max_images": ("INT", {"default": 8, "min": 1, "max": 8, "tooltip": "Maximum total images sent from dynamic sockets and IMAGE batches."}),
+                "max_images": ("INT", {"default": 10, "min": 1, "max": 10, "tooltip": "Maximum total images sent from dynamic sockets and IMAGE batches."}),
                 "max_image_edge": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 64, "tooltip": "0 preserves input resolution; a positive limit downsizes images before sending."}),
                 "auto_unload": ("BOOLEAN", {"default": False, "tooltip": "After generation, unload an embedded model or stop a Start Server-owned llama-server. Attached Connection servers are never stopped."}),
                 "clear_context_before_run": ("BOOLEAN", {"default": True, "tooltip": "Default on: discard this node's saved conversation and skill state before every execution. Turn off for a continuing multi-turn conversation."}),
@@ -796,7 +969,7 @@ class LlamaWorkbenchChat:
         seed=-1,
         use_cache=True,
         thinking="off",
-        max_images=8,
+        max_images=10,
         max_image_edge=0,
         auto_unload=False,
         clear_context_before_run=True,
@@ -813,6 +986,8 @@ class LlamaWorkbenchChat:
         image6=None,
         image7=None,
         image8=None,
+        image9=None,
+        image10=None,
     ):
         message = str(lwb_user_message or "").strip()
         history = _parse_history(lwb_history_json)
@@ -844,7 +1019,7 @@ class LlamaWorkbenchChat:
                 effective["use_cache"] = bool(use_cache)
         thinking_mode = str(thinking or "off").strip().lower()
         enable_thinking = None if thinking_mode == "auto" else thinking_mode == "on"
-        image_limit = min(8, _safe_int(max_images, 8, 1))
+        image_limit = min(DYNAMIC_IMAGE_LIMIT, _safe_int(max_images, DYNAMIC_IMAGE_LIMIT, 1))
         image_edge = _safe_int(max_image_edge, 0, 0)
         resolved_skill = _resolve_skill(skill, message, flow_state)
         base_system = str(effective["system_prompt"] or "").strip()
@@ -864,7 +1039,19 @@ class LlamaWorkbenchChat:
         if effective["max_history_messages"]:
             messages.extend(history[-effective["max_history_messages"] :])
         image_urls: list[str] = []
-        for supplied in (image, image1, image2, image3, image4, image5, image6, image7, image8):
+        for supplied in (
+            image,
+            image1,
+            image2,
+            image3,
+            image4,
+            image5,
+            image6,
+            image7,
+            image8,
+            image9,
+            image10,
+        ):
             remaining = image_limit - len(image_urls)
             if supplied is None or remaining <= 0:
                 continue
@@ -1003,6 +1190,7 @@ NODE_CLASS_MAPPINGS = {
     "LlamaWorkbench_EmbeddedModel": LlamaWorkbenchEmbeddedModel,
     "LlamaWorkbench_ReleaseEmbedded": LlamaWorkbenchReleaseEmbedded,
     "LlamaWorkbench_Prompt": LlamaWorkbenchPrompt,
+    "LlamaWorkbench_PromptEnhancer": LlamaWorkbenchPromptEnhancer,
     "LlamaWorkbench_ChatSettings": LlamaWorkbenchChatSettings,
     "LlamaWorkbench_SkillLoader": LlamaWorkbenchSkillLoader,
     "LlamaWorkbench_Chat": LlamaWorkbenchChat,
@@ -1018,6 +1206,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LlamaWorkbench_EmbeddedModel": "Llama Workbench Embedded VL Model",
     "LlamaWorkbench_ReleaseEmbedded": "Llama Workbench Release Embedded Model",
     "LlamaWorkbench_Prompt": "Llama Workbench Prompt / Image2Prompt",
+    "LlamaWorkbench_PromptEnhancer": "Llama Workbench Qwen Image 2.1 Prompt Enhancer",
     "LlamaWorkbench_ChatSettings": "Llama Workbench Chat Settings",
     "LlamaWorkbench_SkillLoader": "Llama Workbench Skill Loader",
     "LlamaWorkbench_Chat": "Llama Workbench Chat",

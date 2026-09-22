@@ -12,6 +12,7 @@ EXPECTED_FILES = {
     "02_existing-server-image-to-prompt.json",
     "03_skill-chat.json",
     "04_embedded-qwen-gemma-vlm.json",
+    "05_qwen-image-2.1-pe-t2i-gguf.json",
 }
 
 

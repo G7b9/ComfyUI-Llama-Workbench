@@ -1,10 +1,11 @@
 import { app } from "../../scripts/app.js";
 
 const PROMPT_NODE = "LlamaWorkbench_Prompt";
+const PROMPT_ENHANCER_NODE = "LlamaWorkbench_PromptEnhancer";
 const CHAT_NODE = "LlamaWorkbench_Chat";
-const DYNAMIC_IMAGE_NODES = new Set([PROMPT_NODE, CHAT_NODE]);
-const MAX_IMAGES = 8;
-const IMAGE_NAME = /^image([1-8])$/;
+const DYNAMIC_IMAGE_NODES = new Set([PROMPT_NODE, PROMPT_ENHANCER_NODE, CHAT_NODE]);
+const MAX_IMAGES = 10;
+const IMAGE_NAME = /^image(10|[1-9])$/;
 
 function isImageSlot(input) {
     return input?.name === "image" || IMAGE_NAME.test(input?.name || "");

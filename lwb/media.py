@@ -7,7 +7,7 @@ import io
 from typing import Any
 
 
-def image_tensor_to_data_urls(image: Any, max_images: int = 8, max_edge: int = 0) -> list[str]:
+def image_tensor_to_data_urls(image: Any, max_images: int = 10, max_edge: int = 0) -> list[str]:
     """Encode a ComfyUI IMAGE tensor batch as compact JPEG data URLs.
 
     ``IMAGE`` is normally a float tensor shaped ``[B, H, W, C]`` in the 0..1

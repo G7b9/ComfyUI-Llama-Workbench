@@ -17,7 +17,6 @@ from lwb.nodes import (
     LlamaWorkbenchChatDisplay,
     LlamaWorkbenchChatSettings,
     LlamaWorkbenchPrompt,
-    LlamaWorkbenchSkillLoader,
     LlamaWorkbenchStartServer,
 )
 
@@ -204,12 +203,13 @@ def test_prompt_defaults_to_unlimited_tokens_with_thinking_disabled():
     assert required["max_tokens"][1]["min"] == -1
     assert required["thinking"][1]["default"] == "off"
     assert required["seed"][1]["default"] == -1
-    assert required["max_images"][1]["default"] == 8
+    assert required["max_images"][1]["default"] == 10
+    assert required["max_images"][1]["max"] == 10
     assert required["max_image_edge"][1]["default"] == 0
     assert required["auto_unload"][1]["default"] is False
     assert inspect.signature(image_tensor_to_data_urls).parameters["max_edge"].default == 0
     optional_images = LlamaWorkbenchPrompt.INPUT_TYPES()["optional"]
-    assert {"image", *(f"image{index}" for index in range(1, 9))} <= set(optional_images)
+    assert {"image", *(f"image{index}" for index in range(1, 11))} <= set(optional_images)
     settings = LlamaWorkbenchChatSettings.INPUT_TYPES()["required"]
     assert settings["max_tokens"][1]["default"] == -1
     assert settings["seed"][1]["default"] == -1
@@ -220,10 +220,11 @@ def test_prompt_defaults_to_unlimited_tokens_with_thinking_disabled():
 def test_chat_exposes_dynamic_image_inputs_and_direct_edge_limit():
     required = LlamaWorkbenchChat.INPUT_TYPES()["required"]
     optional = LlamaWorkbenchChat.INPUT_TYPES()["optional"]
-    assert required["max_images"][1]["default"] == 8
+    assert required["max_images"][1]["default"] == 10
+    assert required["max_images"][1]["max"] == 10
     assert required["max_image_edge"][1]["default"] == 0
     assert required["auto_unload"][1]["default"] is False
-    assert {"image", *(f"image{index}" for index in range(1, 9))} <= set(optional)
+    assert {"image", *(f"image{index}" for index in range(1, 11))} <= set(optional)
     assert LlamaWorkbenchChatSettings.IS_CHANGED(system_prompt="") is False
     assert LlamaWorkbenchChat.IS_CHANGED() is False
     assert math.isnan(LlamaWorkbenchChat.IS_CHANGED(use_cache=False))
