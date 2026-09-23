@@ -536,6 +536,7 @@ def test_prompt_image_frontend_uses_native_dynamic_slots_without_dom_widgets():
     assert 'node.addInput(name, "IMAGE")' in source
     assert "`image${index}`" in source
     assert 'const CHAT_NODE = "LlamaWorkbench_Chat";' in source
+    assert 'const PE_CANVAS_NODE = "LlamaWorkbench_QwenImage21PECanvas";' in source
     assert "DYNAMIC_IMAGE_NODES" in source
     assert "addDOMWidget" not in source
 

@@ -194,3 +194,26 @@ def test_server_backend_exposes_reasoning_when_content_is_empty():
     completion = backend.chat_response([{"role": "user", "content": "describe"}])
     assert completion.content == ""
     assert completion.reasoning == "image analysis"
+
+
+def test_server_backend_can_return_empty_truncated_completion_for_pe_retry():
+    class TruncatedResponse(FakeResponse):
+        @staticmethod
+        def json():
+            return {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]}
+
+    class TruncatedSession(FakeSession):
+        def post(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return TruncatedResponse()
+
+    backend = ServerBackend("http://localhost:8080")
+    backend._session = TruncatedSession()
+
+    completion = backend.chat_response(
+        [{"role": "user", "content": "describe"}],
+        accept_truncated_response=True,
+    )
+
+    assert completion.content == ""
+    assert completion.finish_reason == "length"

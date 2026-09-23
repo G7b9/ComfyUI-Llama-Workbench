@@ -2,8 +2,9 @@ import { app } from "../../scripts/app.js";
 
 const PROMPT_NODE = "LlamaWorkbench_Prompt";
 const PROMPT_ENHANCER_NODE = "LlamaWorkbench_PromptEnhancer";
+const PE_CANVAS_NODE = "LlamaWorkbench_QwenImage21PECanvas";
 const CHAT_NODE = "LlamaWorkbench_Chat";
-const DYNAMIC_IMAGE_NODES = new Set([PROMPT_NODE, PROMPT_ENHANCER_NODE, CHAT_NODE]);
+const DYNAMIC_IMAGE_NODES = new Set([PROMPT_NODE, PROMPT_ENHANCER_NODE, PE_CANVAS_NODE, CHAT_NODE]);
 const MAX_IMAGES = 10;
 const IMAGE_NAME = /^image(10|[1-9])$/;
 

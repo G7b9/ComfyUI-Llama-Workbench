@@ -17,6 +17,7 @@ from .prompt_rewrite import (
     MAX_PROMPT_REWRITE_IMAGES,
     PROMPT_REWRITE_AUTO_ASPECT_RATIO,
     QWEN_IMAGE_21_ASPECT_RATIOS,
+    prompt_rewrite_canvas_spec,
     prompt_rewrite_dimensions,
     rewrite_prompt,
 )
@@ -36,6 +37,8 @@ BACKEND_TYPE = "LLAMA_WORKBENCH_BACKEND"
 SETTINGS_TYPE = "LLAMA_WORKBENCH_CHAT_SETTINGS"
 SKILL_TYPE = "LLAMA_WORKBENCH_SKILL"
 DYNAMIC_IMAGE_LIMIT = 10
+PE_EDIT_IMAGE_MAX_EDGE = 4096
+PE_EDIT_IMAGE_PIXEL_BUDGET = 1024 * 1024
 _THINKING_BLOCK = re.compile(r"<(?:think|thinking)>\s*(.*?)\s*</(?:think|thinking)>", re.IGNORECASE | re.DOTALL)
 _UNCLOSED_THINKING_BLOCK = re.compile(r"^\s*<(?:think|thinking)>\s*(.*)$", re.IGNORECASE | re.DOTALL)
 _THINKING_HEADING = re.compile(
@@ -78,6 +81,32 @@ def _input_image_dimensions(image: Any) -> tuple[int, int]:
     if width <= 0 or height <= 0:
         raise ValueError("IMAGE input width and height must be positive")
     return width, height
+
+
+def _image_batch_dimensions(image: Any, max_images: int) -> list[tuple[int, int]]:
+    """Return flattened Comfy IMAGE batch dimensions without importing torch."""
+
+    width, height = _input_image_dimensions(image)
+    try:
+        batch_size = int(image.shape[0])
+    except (AttributeError, IndexError, TypeError, ValueError) as exc:
+        raise ValueError("image must be a ComfyUI IMAGE tensor shaped [B, H, W, C]") from exc
+    return [(width, height)] * min(max(0, batch_size), max(0, int(max_images)))
+
+
+def _qwen_image_21_empty_latent(width: int, height: int) -> dict[str, Any]:
+    """Create the native 64-channel, 1/16-scale Qwen-Image-2.1 latent."""
+
+    try:
+        import torch
+        from comfy import model_management
+    except ImportError as exc:  # pragma: no cover - provided by the ComfyUI host
+        raise RuntimeError("Qwen-Image-2.1 Canvas requires the ComfyUI torch runtime") from exc
+    samples = torch.zeros(
+        [1, 64, int(height) // 16, int(width) // 16],
+        device=model_management.intermediate_device(),
+    )
+    return {"samples": samples}
 
 
 def _nearest_h3_aspect_ratio(width: int, height: int) -> str:
@@ -760,11 +789,11 @@ class LlamaWorkbenchPromptEnhancer:
                 "max_image_edge": (
                     "INT",
                     {
-                        "default": 0,
+                        "default": PE_EDIT_IMAGE_MAX_EDGE,
                         "min": 0,
-                        "max": 8192,
+                        "max": PE_EDIT_IMAGE_MAX_EDGE,
                         "step": 64,
-                        "tooltip": "0 preserves input resolution; a positive limit downsizes PE-I2I images before sending.",
+                        "tooltip": "PE-I2I images are capped at 4096 pixels on the longest edge; 0 uses that cap.",
                     },
                 ),
                 "auto_unload": (
@@ -772,6 +801,16 @@ class LlamaWorkbenchPromptEnhancer:
                     {
                         "default": False,
                         "tooltip": "Release a Workbench-owned backend after the enhancement request and its possible format retry.",
+                    },
+                ),
+                "max_image_pixels": (
+                    "INT",
+                    {
+                        "default": PE_EDIT_IMAGE_PIXEL_BUDGET,
+                        "min": 65536,
+                        "max": PE_EDIT_IMAGE_PIXEL_BUDGET,
+                        "step": 65536,
+                        "tooltip": "PE-I2I per-image pixel budget before lossless PNG transport.",
                     },
                 ),
             },
@@ -787,8 +826,9 @@ class LlamaWorkbenchPromptEnhancer:
         system_prompt_path,
         seed=42,
         max_images=10,
-        max_image_edge=0,
+        max_image_edge=PE_EDIT_IMAGE_MAX_EDGE,
         auto_unload=False,
+        max_image_pixels=PE_EDIT_IMAGE_PIXEL_BUDGET,
         image=None,
         image1=None,
         image2=None,
@@ -802,7 +842,13 @@ class LlamaWorkbenchPromptEnhancer:
         image10=None,
     ):
         image_limit = min(MAX_PROMPT_REWRITE_IMAGES, _safe_int(max_images, 10, 1))
-        image_edge = _safe_int(max_image_edge, 0, 0)
+        edit_mode = str(task or "").strip().lower() in {"edit", "i2i"}
+        requested_edge = _safe_int(max_image_edge, PE_EDIT_IMAGE_MAX_EDGE, 0)
+        image_edge = min(requested_edge or PE_EDIT_IMAGE_MAX_EDGE, PE_EDIT_IMAGE_MAX_EDGE)
+        image_pixels = min(
+            _safe_int(max_image_pixels, PE_EDIT_IMAGE_PIXEL_BUDGET, 65536),
+            PE_EDIT_IMAGE_PIXEL_BUDGET,
+        )
         image_urls: list[str] = []
         for supplied in (
             image,
@@ -820,7 +866,15 @@ class LlamaWorkbenchPromptEnhancer:
             remaining = image_limit - len(image_urls)
             if supplied is None or remaining <= 0:
                 continue
-            image_urls.extend(image_tensor_to_data_urls(supplied, max_images=remaining, max_edge=image_edge))
+            image_urls.extend(
+                image_tensor_to_data_urls(
+                    supplied,
+                    max_images=remaining,
+                    max_edge=image_edge,
+                    max_pixels=image_pixels if edit_mode else 0,
+                    image_format="png" if edit_mode else "jpeg",
+                )
+            )
         try:
             result = rewrite_prompt(
                 backend,
@@ -912,6 +966,122 @@ class LlamaWorkbenchQwenImage21PEResolution:
             multiple=multiple,
             aspect_ratio_override=aspect_ratio_override,
         )
+
+
+class LlamaWorkbenchQwenImage21PECanvas:
+    """Resolve PE sizing fields and create a native Qwen-Image-2.1 latent."""
+
+    CATEGORY = "Llama Workbench / Generation"
+    RETURN_TYPES = ("INT", "INT", "LATENT", "STRING")
+    RETURN_NAMES = ("width", "height", "latent", "ratio_source")
+    FUNCTION = "build"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        images = {
+            "image": ("IMAGE", {"tooltip": "Legacy first image; it becomes image1 after connection."}),
+            **{
+                f"image{index}": (
+                    "IMAGE",
+                    {"tooltip": f"Reference image {index}; order must match Prompt Enhancer and TextEncodeQwenImage21."},
+                )
+                for index in range(1, MAX_PROMPT_REWRITE_IMAGES + 1)
+            },
+        }
+        return {
+            "required": {
+                "wh_ratio": ("STRING", {"forceInput": True, "tooltip": "Prompt Enhancer wh_ratio."}),
+                "ratio_follow": (
+                    "STRING",
+                    {"forceInput": True, "tooltip": "Prompt Enhancer ratio_follow, such as <image2>."},
+                ),
+                "megapixels": (
+                    "FLOAT",
+                    {
+                        "default": 1.0,
+                        "min": 0.1,
+                        "max": 16.0,
+                        "step": 0.1,
+                        "tooltip": "Pixel budget for wh_ratio or aspect-only ratio_follow sizing.",
+                    },
+                ),
+                "multiple": (
+                    "INT",
+                    {
+                        "default": 32,
+                        "min": 16,
+                        "max": 128,
+                        "step": 16,
+                        "tooltip": "Canvas dimensions are rounded to this multiple; it must be divisible by 16.",
+                    },
+                ),
+                "aspect_ratio_override": (
+                    [PROMPT_REWRITE_AUTO_ASPECT_RATIO, *QWEN_IMAGE_21_ASPECT_RATIOS],
+                    {
+                        "default": PROMPT_REWRITE_AUTO_ASPECT_RATIO,
+                        "tooltip": "Auto honors PE wh_ratio/ratio_follow; a concrete ratio overrides both.",
+                    },
+                ),
+                "follow_input_size": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "For ratio_follow, use the selected input's size (rounded); off uses its aspect at the megapixel budget.",
+                    },
+                ),
+            },
+            "optional": images,
+        }
+
+    def build(
+        self,
+        wh_ratio: str,
+        ratio_follow: str,
+        megapixels: float = 1.0,
+        multiple: int = 32,
+        aspect_ratio_override: str = PROMPT_REWRITE_AUTO_ASPECT_RATIO,
+        follow_input_size: bool = True,
+        image=None,
+        image1=None,
+        image2=None,
+        image3=None,
+        image4=None,
+        image5=None,
+        image6=None,
+        image7=None,
+        image8=None,
+        image9=None,
+        image10=None,
+    ):
+        dimensions: list[tuple[int, int]] = []
+        for supplied in (
+            image,
+            image1,
+            image2,
+            image3,
+            image4,
+            image5,
+            image6,
+            image7,
+            image8,
+            image9,
+            image10,
+        ):
+            remaining = MAX_PROMPT_REWRITE_IMAGES - len(dimensions)
+            if supplied is None or remaining <= 0:
+                continue
+            dimensions.extend(_image_batch_dimensions(supplied, remaining))
+        spec = prompt_rewrite_canvas_spec(
+            wh_ratio,
+            ratio_follow,
+            dimensions,
+            megapixels=megapixels,
+            multiple=multiple,
+            aspect_ratio_override=aspect_ratio_override,
+            follow_input_size=bool(follow_input_size),
+        )
+        latent = _qwen_image_21_empty_latent(spec.width, spec.height)
+        return spec.width, spec.height, latent, spec.ratio_source
 
 
 class LlamaWorkbenchChatSettings:
@@ -1262,6 +1432,7 @@ NODE_CLASS_MAPPINGS = {
     "LlamaWorkbench_Prompt": LlamaWorkbenchPrompt,
     "LlamaWorkbench_PromptEnhancer": LlamaWorkbenchPromptEnhancer,
     "LlamaWorkbench_QwenImage21PEResolution": LlamaWorkbenchQwenImage21PEResolution,
+    "LlamaWorkbench_QwenImage21PECanvas": LlamaWorkbenchQwenImage21PECanvas,
     "LlamaWorkbench_ChatSettings": LlamaWorkbenchChatSettings,
     "LlamaWorkbench_SkillLoader": LlamaWorkbenchSkillLoader,
     "LlamaWorkbench_Chat": LlamaWorkbenchChat,
@@ -1279,6 +1450,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LlamaWorkbench_Prompt": "Llama Workbench Prompt / Image2Prompt",
     "LlamaWorkbench_PromptEnhancer": "Llama Workbench Qwen Image 2.1 Prompt Enhancer",
     "LlamaWorkbench_QwenImage21PEResolution": "Llama Workbench Qwen Image 2.1 PE Resolution",
+    "LlamaWorkbench_QwenImage21PECanvas": "Llama Workbench Qwen Image 2.1 PE Canvas",
     "LlamaWorkbench_ChatSettings": "Llama Workbench Chat Settings",
     "LlamaWorkbench_SkillLoader": "Llama Workbench Skill Loader",
     "LlamaWorkbench_Chat": "Llama Workbench Chat",

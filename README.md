@@ -19,7 +19,8 @@ other packages:
   ownership of it.
 - Generate text or image-to-prompt results through either backend.
 - Run Qwen-Image-2.1 Prompt Enhancer checkpoints through the same backend,
-  with official task sampling profiles and strict structured outputs.
+  with official task sampling profiles, strict structured outputs, native
+  64-channel Qwen-Image-2.1 latents, and ordered PE-I2I image references.
 - Optionally load Qwen/Gemma-style local models through `llama-cpp-python`,
   including common multimodal chat handlers, KV q8_0 cache choices, and Qwen
   MoE CPU options when the installed binding supports them.
@@ -77,8 +78,9 @@ long reasoning or unlimited-token responses.
 | Llama Workbench Embedded VL Model | Optional direct `llama-cpp-python` loader for Qwen/Gemma-style models. |
 | Llama Workbench Release Embedded Model | Closes an embedded model explicitly. |
 | Llama Workbench Prompt / Image2Prompt | Text prompting and image-to-prompt from a unified backend socket. Its image socket grows from `image` to `image1`, `image2`, and so on as connections are added (up to 10). It also has `seed`, `max_images`, `max_image_edge`, `auto_unload`, and a `thinking` control that defaults to `off`. |
-| Llama Workbench Qwen Image 2.1 Prompt Enhancer | Native structured prompt rewriting over a Workbench backend. It uses the official T2I/edit sampling profiles, forces thinking on, strictly returns `rewritten_prompt`, `wh_ratio`, and `ratio_follow`, and retries one malformed response once. The matching System Prompt must be pasted or loaded from a local file. |
-| Llama Workbench Qwen Image 2.1 PE Resolution | Converts Prompt Enhancer's `wh_ratio` into rounded width and height at a selectable megapixel budget, with an optional manual aspect-ratio override, ready for `EmptyLatentImage`. |
+| Llama Workbench Qwen Image 2.1 Prompt Enhancer | Native structured prompt rewriting over a Workbench backend. It uses the official T2I/edit sampling profiles, validates `rewritten_prompt`, `wh_ratio`, `ratio_follow`, and edit image references, and retries one malformed or truncated response with thinking disabled. The matching System Prompt must be pasted or loaded from a local file. |
+| Llama Workbench Qwen Image 2.1 PE Canvas | Resolves `wh_ratio`, `ratio_follow=<imageN>`, an optional manual ratio override, and `follow_input_size`, then emits width, height, `ratio_source`, and a native `[1,64,H/16,W/16]` Qwen-Image-2.1 `LATENT`. |
+| Llama Workbench Qwen Image 2.1 PE Resolution | Compatibility dimensions-only helper for existing workflows. New Qwen-Image-2.1 workflows should use PE Canvas so KSampler receives the correct 64-channel latent. |
 | Llama Workbench Chat | Interactive local chat: enter text and click its on-node **发送** button to queue only this Chat node and its upstream dependencies (no Queue Prompt click); it starts at a practical default size, remains freely resizable, and keeps long history in a scrollable canvas viewport. `clear_context_before_run` defaults to on, so every queued workflow starts fresh; turn it off for a continuing multi-turn conversation. `use_cache` defaults to on and reuses an unchanged complete request independently of `seed`; turn it off to force a fresh model request. While it is on, `release_comfy_cache_after_run` is skipped so the response remains reusable. `release_owned_server_after_run` defaults to on and stops an owned llama-server immediately after Chat responds, before downstream H3/video nodes allocate VRAM. **清空上下文** / **清空输入** actions and a text-token context meter are included. Start Server supplies the meter's `context_size` automatically; set `context_size` on an external Connection to obtain a percentage. Graph-persisted history, direct `max_tokens` / `seed` / `thinking` / `auto_unload` controls, and dynamic image sockets (up to 10) with `max_image_edge` are also included. |
 | Llama Workbench Chat Output Display | Canvas-only terminal viewer that separately previews a Chat node's `thinking` and `assistant_message` outputs. |
 | Llama Workbench Chat Settings | System prompt, sampling, context-history, and image-size controls. |
@@ -86,10 +88,11 @@ long reasoning or unlimited-token responses.
 
 ## Importable workflows
 
-Five ready-to-import workflow JSON files are included in
+Seven ready-to-import workflow JSON files are included in
 [`examples/`](examples/README.md): owned-server chat, attached-server
 image-to-prompt, Skill chat, embedded Qwen/Gemma VLM image-to-prompt, and Qwen
-Image 2.1 PE-T2I GGUF prompt rewriting.
+Image 2.1 PE-T2I, two-image PE-I2I generation, and a ten-image PE-I2I transport
+smoke test.
 Replace their generic model and binary placeholders with paths that are visible
 to the host running ComfyUI.
 
@@ -147,25 +150,47 @@ values into a generic Prompt node. Its `t2i` profile sends `temperature=1.0`,
 `max_tokens=16256`, and `enable_thinking=true`. It parses exactly one JSON
 object—no Markdown fences, prose, repaired JSON, aliases, or unknown fields—and
 exposes `rewritten_prompt`, `wh_ratio`, and the normalized empty
-`ratio_follow` as separate sockets plus `result_json`. A formatting failure
-gets one corrective retry; a second failure stops the workflow with an error
-instead of silently passing unreliable text downstream.
+`ratio_follow` as separate sockets plus `result_json`. A formatting failure or
+a generation truncated by the server gets one corrective retry. That retry
+turns thinking off and asks only for the final JSON; a second failure stops the
+workflow instead of silently passing unreliable text downstream.
 
-Connect `wh_ratio` to **Llama Workbench Qwen Image 2.1 PE Resolution** to turn
-the selected aspect ratio into `width` and `height` at a chosen megapixel
-budget. Its `aspect_ratio_override` defaults to `Auto (use Prompt Enhancer)`;
-selecting a concrete ratio forces the generated dimensions without changing
-the rewritten prompt. The complete `05_qwen-image-2.1-pe-t2i-gguf.json`
-example wires these outputs and `rewritten_prompt` into ComfyUI's native
-Qwen-Image-2.1 generation chain, auto-unloads the PE server before diffusion
-sampling, and saves the generated image.
+Connect both `wh_ratio` and `ratio_follow` to **Llama Workbench Qwen Image 2.1
+PE Canvas**. It emits rounded `width` and `height`, a diagnostic
+`ratio_source`, and the native Qwen-Image-2.1 latent shape
+`[1,64,H/16,W/16]`. `aspect_ratio_override` can force a ratio without changing
+the rewritten prompt. In edit workflows, `ratio_follow=<imageN>` selects that
+ordered reference image; `follow_input_size=true` preserves its rounded input
+size, while `false` preserves only its aspect ratio at the selected megapixel
+budget. The complete `05_qwen-image-2.1-pe-t2i-gguf.json` example uses this
+latent directly rather than the generic four-channel `EmptyLatentImage`, wires
+`rewritten_prompt` into ComfyUI's native Qwen-Image-2.1 generation chain,
+auto-unloads the PE server before diffusion sampling, and saves the image.
 
-The `edit` profile and ordered `image1`…`image10` transport are already exposed
-for the later PE-I2I path. It uses the official edit sampling differences
-(`presence_penalty=0`, `max_tokens=24000`) and requires at least one image. Use
-it only with the matching PE-I2I checkpoint, System Prompt, and multimodal
-projector supplied through Start Server's `mmproj_path`; those assets are not
-bundled or auto-downloaded.
+The `edit` profile supports ordered `image1`…`image10` transport and uses the
+official edit sampling differences (`presence_penalty=0`,
+`max_tokens=24000`). Images sent to PE-I2I are lossless PNGs constrained by
+default to 1,048,576 pixels and a 4096-pixel maximum edge. At request time the
+node adds a dynamic rule for the exact image count, without embedding the
+official System Prompt, and validates the returned `<image1>`…`<imageN>`
+references. Multi-image output must reference every input image, while a
+single-image rewritten prompt must not include an image tag.
+
+`06_qwen-image-2.1-pe-edit-2-images-gguf.json` demonstrates the two-image edit
+graph. Configure a matching PE-I2I GGUF, BF16 mmproj, external System Prompt,
+and the native Qwen-Image-2.1 generation models. It uses context 49152 and
+`--jinja --reasoning-format none --parallel 1 --image-min-tokens 1024`. The two
+reference images enter Prompt Enhancer, PE Canvas, and
+`TextEncodeQwenImage21` in the same order; TextEncode supplies KSampler's
+positive and negative conditioning, while PE Canvas supplies its latent. No
+model, mmproj, or official prompt is bundled or downloaded automatically.
+
+`07_qwen-image-2.1-pe-edit-10-images-smoke-gguf.json` is a focused PE-I2I
+transport and structured-output smoke test. It connects ten Load Image nodes
+in strict `image1`…`image10` order, uses the same 49152 context and server
+arguments, and relies on the parser to require all ten tags in the rewritten
+prompt. It intentionally stops after Prompt Enhancer; use 06 for the complete
+diffusion-generation graph.
 
 ## H3-compatible automatic resolution
 

@@ -1,0 +1,312 @@
+{
+  "id": "73524680-8fae-4709-875a-167d1fabc107",
+  "revision": 1,
+  "last_node_id": 12,
+  "last_link_id": 11,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LlamaWorkbench_StartServer",
+      "pos": [20, 20],
+      "size": [470, 470],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {"name": "model_path", "type": "STRING", "widget": {"name": "model_path"}, "link": null},
+        {"name": "binary_path", "type": "STRING", "widget": {"name": "binary_path"}, "link": null},
+        {"name": "host", "type": "STRING", "widget": {"name": "host"}, "link": null},
+        {"name": "port", "type": "INT", "widget": {"name": "port"}, "link": null},
+        {"name": "context_size", "type": "INT", "widget": {"name": "context_size"}, "link": null},
+        {"name": "gpu_layers", "type": "INT", "widget": {"name": "gpu_layers"}, "link": null},
+        {"name": "extra_args", "type": "STRING", "widget": {"name": "extra_args"}, "link": null},
+        {"name": "mmproj_path", "type": "STRING", "widget": {"name": "mmproj_path"}, "link": null},
+        {"name": "wait_seconds", "type": "FLOAT", "widget": {"name": "wait_seconds"}, "link": null},
+        {"name": "timeout_seconds", "type": "FLOAT", "widget": {"name": "timeout_seconds"}, "link": null},
+        {"name": "release_comfy_models", "type": "BOOLEAN", "widget": {"name": "release_comfy_models"}, "link": null},
+        {"name": "cleanup_previous_server", "type": "BOOLEAN", "widget": {"name": "cleanup_previous_server"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "backend", "type": "LLAMA_WORKBENCH_BACKEND", "links": [1]},
+        {"name": "server_url", "type": "STRING", "links": null},
+        {"name": "started", "type": "BOOLEAN", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LlamaWorkbench_StartServer"},
+      "widgets_values": [
+        "/path/to/Qwen-Image-2.1-PE-I2I.Q5_K_M.gguf",
+        "/path/to/llama-server",
+        "127.0.0.1",
+        8080,
+        49152,
+        -1,
+        "--jinja --reasoning-format none --parallel 1 --image-min-tokens 1024",
+        "/path/to/Qwen-Image-2.1-PE-I2I.mmproj-bf16.gguf",
+        600,
+        1800,
+        true,
+        true
+      ]
+    },
+    {
+      "id": 2,
+      "type": "LlamaWorkbench_PromptEnhancer",
+      "pos": [1130, 140],
+      "size": [580, 660],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {"name": "backend", "type": "LLAMA_WORKBENCH_BACKEND", "link": 1},
+        {"name": "prompt", "type": "STRING", "widget": {"name": "prompt"}, "link": null},
+        {"name": "task", "type": "COMBO", "widget": {"name": "task"}, "link": null},
+        {"name": "system_prompt", "type": "STRING", "widget": {"name": "system_prompt"}, "link": null},
+        {"name": "system_prompt_path", "type": "STRING", "widget": {"name": "system_prompt_path"}, "link": null},
+        {"name": "seed", "type": "INT", "widget": {"name": "seed"}, "link": null},
+        {"name": "max_images", "type": "INT", "widget": {"name": "max_images"}, "link": null},
+        {"name": "max_image_edge", "type": "INT", "widget": {"name": "max_image_edge"}, "link": null},
+        {"name": "auto_unload", "type": "BOOLEAN", "widget": {"name": "auto_unload"}, "link": null},
+        {"name": "max_image_pixels", "type": "INT", "widget": {"name": "max_image_pixels"}, "link": null},
+        {"name": "image1", "type": "IMAGE", "link": 2},
+        {"name": "image2", "type": "IMAGE", "link": 3},
+        {"name": "image3", "type": "IMAGE", "link": 4},
+        {"name": "image4", "type": "IMAGE", "link": 5},
+        {"name": "image5", "type": "IMAGE", "link": 6},
+        {"name": "image6", "type": "IMAGE", "link": 7},
+        {"name": "image7", "type": "IMAGE", "link": 8},
+        {"name": "image8", "type": "IMAGE", "link": 9},
+        {"name": "image9", "type": "IMAGE", "link": 10},
+        {"name": "image10", "type": "IMAGE", "link": 11}
+      ],
+      "outputs": [
+        {"name": "rewritten_prompt", "type": "STRING", "links": null},
+        {"name": "wh_ratio", "type": "STRING", "links": null},
+        {"name": "ratio_follow", "type": "STRING", "links": null},
+        {"name": "result_json", "type": "STRING", "links": null},
+        {"name": "thinking", "type": "STRING", "links": null},
+        {"name": "backend_info", "type": "STRING", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LlamaWorkbench_PromptEnhancer"},
+      "widgets_values": [
+        "制作一张十宫格视觉索引海报，按输入顺序为每个格子使用独立参考：<image1>、<image2>、<image3>、<image4>、<image5>、<image6>、<image7>、<image8>、<image9>、<image10>；以<image10>的画布比例为准。",
+        "edit",
+        "",
+        "/path/to/Qwen-Image-2.1-PE-I2I/system_prompt.txt",
+        42,
+        "fixed",
+        10,
+        4096,
+        true,
+        1048576
+      ]
+    },
+    {
+      "id": 3,
+      "type": "LoadImage",
+      "pos": [520, 20],
+      "size": [260, 180],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [2]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["", "image"]
+    },
+    {
+      "id": 4,
+      "type": "LoadImage",
+      "pos": [800, 20],
+      "size": [260, 180],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [3]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["", "image"]
+    },
+    {
+      "id": 5,
+      "type": "LoadImage",
+      "pos": [520, 220],
+      "size": [260, 180],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [4]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["", "image"]
+    },
+    {
+      "id": 6,
+      "type": "LoadImage",
+      "pos": [800, 220],
+      "size": [260, 180],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [5]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["", "image"]
+    },
+    {
+      "id": 7,
+      "type": "LoadImage",
+      "pos": [520, 420],
+      "size": [260, 180],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [6]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["", "image"]
+    },
+    {
+      "id": 8,
+      "type": "LoadImage",
+      "pos": [800, 420],
+      "size": [260, 180],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [7]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["", "image"]
+    },
+    {
+      "id": 9,
+      "type": "LoadImage",
+      "pos": [520, 620],
+      "size": [260, 180],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [8]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["", "image"]
+    },
+    {
+      "id": 10,
+      "type": "LoadImage",
+      "pos": [800, 620],
+      "size": [260, 180],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [9]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["", "image"]
+    },
+    {
+      "id": 11,
+      "type": "LoadImage",
+      "pos": [520, 820],
+      "size": [260, 180],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [10]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["", "image"]
+    },
+    {
+      "id": 12,
+      "type": "LoadImage",
+      "pos": [800, 820],
+      "size": [260, 180],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [11]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["", "image"]
+    }
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "LLAMA_WORKBENCH_BACKEND"],
+    [2, 3, 0, 2, 10, "IMAGE"],
+    [3, 4, 0, 2, 11, "IMAGE"],
+    [4, 5, 0, 2, 12, "IMAGE"],
+    [5, 6, 0, 2, 13, "IMAGE"],
+    [6, 7, 0, 2, 14, "IMAGE"],
+    [7, 8, 0, 2, 15, "IMAGE"],
+    [8, 9, 0, 2, 16, "IMAGE"],
+    [9, 10, 0, 2, 17, "IMAGE"],
+    [10, 11, 0, 2, 18, "IMAGE"],
+    [11, 12, 0, 2, 19, "IMAGE"]
+  ],
+  "groups": [
+    {"id": 1, "title": "Qwen-Image-2.1 PE-I2I — 10 Image Transport Smoke", "bounding": [0, 0, 1740, 1040], "color": "#8a5b9e", "font_size": 24}
+  ],
+  "config": {},
+  "extra": {"ds": {"scale": 0.72, "offset": [20, 20]}},
+  "version": 0.4
+}

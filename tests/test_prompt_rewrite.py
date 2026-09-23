@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 
 import pytest
 
+import lwb.nodes as nodes_module
 from lwb.backend import ChatResponse
 from lwb.nodes import (
+    LlamaWorkbenchQwenImage21PECanvas,
     LlamaWorkbenchPromptEnhancer,
     LlamaWorkbenchQwenImage21PEResolution,
     NODE_CLASS_MAPPINGS,
@@ -15,9 +19,11 @@ from lwb.prompt_rewrite import (
     PROMPT_REWRITE_AUTO_ASPECT_RATIO,
     QWEN_IMAGE_21_ASPECT_RATIOS,
     PromptRewriteFormatError,
+    build_edit_image_reference_rule,
     build_prompt_rewrite_messages,
     load_system_prompt,
     parse_prompt_rewrite_json,
+    prompt_rewrite_canvas_spec,
     prompt_rewrite_dimensions,
     rewrite_prompt,
 )
@@ -76,10 +82,19 @@ def test_edit_messages_keep_images_in_numbered_order_before_text():
     )
 
     content = messages[1]["content"]
+    assert "exactly 2 input image(s)" in messages[0]["content"]
+    assert "<image1>, <image2>" in messages[0]["content"]
     assert [part["type"] for part in content] == ["image_url", "image_url", "text"]
     assert content[0]["image_url"]["url"].endswith("one")
     assert content[1]["image_url"]["url"].endswith("two")
     assert content[2]["text"] == "edit these"
+
+
+def test_dynamic_edit_image_rule_distinguishes_single_and_multi_image_contracts():
+    assert "Do not use an image tag inside rewritten_prompt" in build_edit_image_reference_rule(1)
+    rule = build_edit_image_reference_rule(3)
+    assert "<image1>, <image2>, <image3>" in rule
+    assert "reference every input image at least once" in rule
 
 
 def test_strict_t2i_parser_normalizes_the_structured_outputs():
@@ -128,13 +143,52 @@ def test_edit_parser_enforces_mutual_exclusion_and_image_bounds():
         )
     with pytest.raises(PromptRewriteFormatError, match="only 2"):
         parse_prompt_rewrite_json(
-            '{"rewritten_prompt":"x","wh_ratio":"","ratio_follow":"<image3>"}',
+            '{"rewritten_prompt":"use <image1> with <image2>","wh_ratio":"","ratio_follow":"<image3>"}',
             profile,
             image_count=2,
         )
 
 
-def test_format_failure_retries_once_with_same_official_sampling_profile():
+def test_edit_parser_validates_rewritten_prompt_image_references():
+    profile = PROMPT_REWRITE_PROFILES["edit"]
+    parsed = parse_prompt_rewrite_json(
+        '{"rewritten_prompt":"Move <image1> into <image2>","wh_ratio":"","ratio_follow":"<image2>"}',
+        profile,
+        image_count=2,
+    )
+    assert parsed["ratio_follow"] == "<image2>"
+    with pytest.raises(PromptRewriteFormatError, match="missing: <image2>"):
+        parse_prompt_rewrite_json(
+            '{"rewritten_prompt":"Edit <image1>","wh_ratio":"","ratio_follow":"<image1>"}',
+            profile,
+            image_count=2,
+        )
+    with pytest.raises(PromptRewriteFormatError, match="single-image edit"):
+        parse_prompt_rewrite_json(
+            '{"rewritten_prompt":"Edit <image1>","wh_ratio":"","ratio_follow":"<image1>"}',
+            profile,
+            image_count=1,
+        )
+
+
+def test_edit_parser_accepts_exactly_ordered_ten_image_reference_set():
+    references = " ".join(f"<image{index}>" for index in range(1, 11))
+    parsed = parse_prompt_rewrite_json(
+        json.dumps(
+            {
+                "rewritten_prompt": f"Use each source independently: {references}",
+                "wh_ratio": "",
+                "ratio_follow": "<image10>",
+            }
+        ),
+        PROMPT_REWRITE_PROFILES["edit"],
+        image_count=10,
+    )
+
+    assert parsed["ratio_follow"] == "<image10>"
+
+
+def test_format_failure_retries_once_without_thinking():
     backend = SequenceBackend(
         ChatResponse(content="not json", reasoning="first thought"),
         ChatResponse(
@@ -150,22 +204,42 @@ def test_format_failure_retries_once_with_same_official_sampling_profile():
     assert result.thinking == "first thought\n\nsecond thought"
     assert result.retried is True
     assert len(backend.calls) == 2
-    assert backend.calls[0][1] == backend.calls[1][1]
+    assert backend.calls[0][1]["enable_thinking"] is True
+    assert backend.calls[1][1]["enable_thinking"] is False
+    assert backend.calls[0][1]["accept_truncated_response"] is True
     assert backend.calls[0][1]["presence_penalty"] == 1.5
     assert backend.calls[0][1]["min_p"] == 0.0
-    assert backend.calls[0][1]["enable_thinking"] is True
     assert [message["role"] for message in backend.calls[1][0]] == [
         "system",
         "user",
-        "assistant",
         "user",
     ]
+    assert "without a thinking trace" in backend.calls[1][0][-1]["content"]
+
+
+def test_generation_truncation_retries_once_even_when_partial_json_is_valid():
+    backend = SequenceBackend(
+        ChatResponse(
+            content='{"rewritten_prompt":"partial","wh_ratio":"1:1"}',
+            finish_reason="length",
+        ),
+        ChatResponse(
+            content='{"rewritten_prompt":"complete","wh_ratio":"1:1"}',
+            finish_reason="stop",
+        ),
+    )
+
+    result = rewrite_prompt(backend, "corgi", system_prompt="user supplied")
+
+    assert result.rewritten_prompt == "complete"
+    assert result.retried is True
+    assert backend.calls[1][1]["enable_thinking"] is False
 
 
 def test_second_format_failure_is_terminal():
     backend = SequenceBackend(ChatResponse(content="bad"), ChatResponse(content="still bad"))
 
-    with pytest.raises(PromptRewriteFormatError, match="invalid structured output twice"):
+    with pytest.raises(PromptRewriteFormatError, match="failed structured output after one retry"):
         rewrite_prompt(backend, "corgi", system_prompt="user supplied")
     assert len(backend.calls) == 2
 
@@ -193,6 +267,44 @@ def test_prompt_enhancer_node_is_registered_and_returns_separate_fields():
         "wh_ratio": "1:1",
         "ratio_follow": "",
     }
+
+
+def test_edit_prompt_enhancer_uses_bounded_lossless_image_transport(monkeypatch):
+    first, second = object(), object()
+    calls = []
+
+    def encode(image, max_images, max_edge, **options):
+        calls.append((image, max_images, max_edge, options))
+        return [f"data:image/png;base64,{len(calls)}"]
+
+    monkeypatch.setattr("lwb.nodes.image_tensor_to_data_urls", encode)
+    backend = SequenceBackend(
+        ChatResponse(
+            content=(
+                '{"rewritten_prompt":"Move <image1> into <image2>",'
+                '"wh_ratio":"","ratio_follow":"<image2>"}'
+            )
+        )
+    )
+
+    output = LlamaWorkbenchPromptEnhancer().enhance(
+        backend,
+        "combine them",
+        "edit",
+        "user supplied",
+        "",
+        max_images=5,
+        max_image_edge=0,
+        max_image_pixels=16777216,
+        image1=first,
+        image2=second,
+    )
+
+    assert output["result"][2] == "<image2>"
+    assert calls == [
+        (first, 5, 4096, {"max_pixels": 1048576, "image_format": "png"}),
+        (second, 4, 4096, {"max_pixels": 1048576, "image_format": "png"}),
+    ]
 
 
 def test_prompt_rewrite_dimensions_preserve_ratio_and_pixel_budget():
@@ -224,3 +336,56 @@ def test_qwen_pe_resolution_node_is_registered_and_uses_force_input():
     assert LlamaWorkbenchQwenImage21PEResolution().select(
         "16:9", aspect_ratio_override="2:3"
     ) == (840, 1256, "2:3")
+
+
+def test_qwen_pe_canvas_resolves_ratio_follow_and_creates_native_latent(monkeypatch):
+    class FakeImage:
+        shape = (1, 768, 1280, 3)
+
+    monkeypatch.setattr(
+        "lwb.nodes._qwen_image_21_empty_latent",
+        lambda width, height: {"samples": {"shape": (1, 64, height // 16, width // 16)}},
+    )
+    canvas = LlamaWorkbenchQwenImage21PECanvas()
+
+    width, height, latent, source = canvas.build(
+        "",
+        "<image1>",
+        image1=FakeImage(),
+        follow_input_size=True,
+    )
+
+    assert (width, height) == (1280, 768)
+    assert latent["samples"]["shape"] == (1, 64, 48, 80)
+    assert source == "ratio_follow:<image1>:input_size"
+    assert NODE_CLASS_MAPPINGS["LlamaWorkbench_QwenImage21PECanvas"] is LlamaWorkbenchQwenImage21PECanvas
+
+
+def test_qwen_image_21_empty_latent_uses_64_channels_and_sixteenth_scale(monkeypatch):
+    calls = []
+    torch_module = types.ModuleType("torch")
+    torch_module.zeros = lambda shape, device=None: calls.append((tuple(shape), device)) or "samples"
+    comfy_module = types.ModuleType("comfy")
+    comfy_module.model_management = types.SimpleNamespace(intermediate_device=lambda: "test-device")
+    monkeypatch.setitem(sys.modules, "torch", torch_module)
+    monkeypatch.setitem(sys.modules, "comfy", comfy_module)
+
+    latent = nodes_module._qwen_image_21_empty_latent(1280, 768)
+
+    assert latent == {"samples": "samples"}
+    assert calls == [((1, 64, 48, 80), "test-device")]
+
+
+def test_qwen_pe_canvas_uses_ratio_budget_when_not_following_input_size():
+    spec = prompt_rewrite_canvas_spec(
+        "",
+        "<image2>",
+        [(640, 640), (1200, 800)],
+        megapixels=1.0,
+        multiple=32,
+        follow_input_size=False,
+    )
+
+    assert spec.width % 32 == spec.height % 32 == 0
+    assert spec.width * spec.height == pytest.approx(1024 * 1024, rel=0.04)
+    assert spec.ratio_source == "ratio_follow:<image2>:aspect_only"

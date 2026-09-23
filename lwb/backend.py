@@ -250,7 +250,9 @@ class ServerBackend:
                     if not choices:
                         raise ValueError("response has no choices")
                     completion = _chat_response_from_choice(choices[0])
-                    if completion.content or completion.reasoning:
+                    if completion.content or completion.reasoning or (
+                        settings.get("accept_truncated_response") and completion.finish_reason
+                    ):
                         return completion
                     finish_reason = completion.finish_reason or "unknown"
                     raise BackendError(
@@ -311,7 +313,9 @@ class EmbeddedBackend:
             if not choices:
                 raise BackendError("Embedded llama-cpp-python returned no choices")
             completion = _chat_response_from_choice(choices[0])
-            if completion.content or completion.reasoning:
+            if completion.content or completion.reasoning or (
+                settings.get("accept_truncated_response") and completion.finish_reason
+            ):
                 return completion
             raise BackendError(
                 "Embedded llama-cpp-python returned no assistant text "

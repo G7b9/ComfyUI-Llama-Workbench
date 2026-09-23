@@ -41,6 +41,8 @@ QWEN_IMAGE_21_ASPECT_RATIOS = (
 _THINK_BLOCK = re.compile(r"<think>\s*(.*?)\s*</think>", re.IGNORECASE | re.DOTALL)
 _RATIO = re.compile(r"^([1-9]\d*):([1-9]\d*)$")
 _IMAGE_REFERENCE = re.compile(r"^<image([1-9]\d*)>$")
+_IMAGE_REFERENCE_CANDIDATE = re.compile(r"<image[^>]*>", re.IGNORECASE)
+_TRUNCATED_FINISH_REASONS = {"length", "limit", "max_tokens", "max_output_tokens"}
 
 
 class PromptRewriteFormatError(ValueError):
@@ -121,6 +123,13 @@ class PromptRewriteResult:
         return json.dumps(self.as_dict(), ensure_ascii=False, separators=(",", ":"))
 
 
+@dataclass(frozen=True, slots=True)
+class PromptRewriteCanvasSpec:
+    width: int
+    height: int
+    ratio_source: str
+
+
 def get_prompt_rewrite_profile(task: str) -> PromptRewriteProfile:
     name = str(task or "").strip().lower()
     if name == "i2i":
@@ -176,6 +185,72 @@ def prompt_rewrite_dimensions(
     return width, height, normalized_ratio
 
 
+def prompt_rewrite_canvas_spec(
+    wh_ratio: str,
+    ratio_follow: str,
+    image_dimensions: Iterable[tuple[int, int]] = (),
+    *,
+    megapixels: float = 1.0,
+    multiple: int = 32,
+    aspect_ratio_override: str = PROMPT_REWRITE_AUTO_ASPECT_RATIO,
+    follow_input_size: bool = True,
+) -> PromptRewriteCanvasSpec:
+    """Resolve PE sizing fields into a Qwen-Image-2.1 canvas specification."""
+
+    override = str(aspect_ratio_override or "").strip()
+    ratio = str(wh_ratio or "").strip()
+    follow = str(ratio_follow or "").strip()
+    dimensions = tuple((int(width), int(height)) for width, height in image_dimensions)
+    try:
+        rounding_multiple = int(multiple)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("multiple must be a positive integer") from exc
+    if rounding_multiple <= 0 or rounding_multiple % 16:
+        raise ValueError("multiple must be a positive multiple of 16 for Qwen-Image-2.1")
+
+    if override and override != PROMPT_REWRITE_AUTO_ASPECT_RATIO:
+        width, height, normalized = prompt_rewrite_dimensions(
+            override,
+            megapixels=megapixels,
+            multiple=rounding_multiple,
+            aspect_ratio_override=override,
+        )
+        return PromptRewriteCanvasSpec(width, height, f"override:{normalized}")
+
+    if bool(ratio) == bool(follow):
+        raise ValueError("exactly one of wh_ratio and ratio_follow must be set in Auto mode")
+    if ratio:
+        width, height, normalized = prompt_rewrite_dimensions(
+            ratio,
+            megapixels=megapixels,
+            multiple=rounding_multiple,
+        )
+        return PromptRewriteCanvasSpec(width, height, f"wh_ratio:{normalized}")
+
+    match = _IMAGE_REFERENCE.fullmatch(follow)
+    if not match:
+        raise ValueError("ratio_follow must use the form <imageN>")
+    image_index = int(match.group(1))
+    if image_index > len(dimensions):
+        raise ValueError(
+            f"ratio_follow references image {image_index}, but Canvas received {len(dimensions)} image(s)"
+        )
+    source_width, source_height = dimensions[image_index - 1]
+    if source_width <= 0 or source_height <= 0:
+        raise ValueError(f"image {image_index} has invalid dimensions {source_width}x{source_height}")
+    if follow_input_size:
+        width = max(rounding_multiple, round(source_width / rounding_multiple) * rounding_multiple)
+        height = max(rounding_multiple, round(source_height / rounding_multiple) * rounding_multiple)
+        return PromptRewriteCanvasSpec(width, height, f"ratio_follow:{follow}:input_size")
+
+    width, height, _ = prompt_rewrite_dimensions(
+        f"{source_width}:{source_height}",
+        megapixels=megapixels,
+        multiple=rounding_multiple,
+    )
+    return PromptRewriteCanvasSpec(width, height, f"ratio_follow:{follow}:aspect_only")
+
+
 def load_system_prompt(system_prompt: str = "", system_prompt_path: str = "") -> str:
     """Load exactly one user-supplied system prompt source.
 
@@ -213,6 +288,35 @@ def load_system_prompt(system_prompt: str = "", system_prompt_path: str = "") ->
     return loaded
 
 
+def build_edit_image_reference_rule(image_count: int) -> str:
+    """Describe the runtime image numbering without embedding Qwen's prompt."""
+
+    count = int(image_count)
+    if count < 1 or count > MAX_PROMPT_REWRITE_IMAGES:
+        raise ValueError(f"edit image count must be between 1 and {MAX_PROMPT_REWRITE_IMAGES}")
+    valid_tags = ", ".join(f"<image{index}>" for index in range(1, count + 1))
+    mapping = "; ".join(
+        f"the {index}{'st' if index == 1 else 'nd' if index == 2 else 'rd' if index == 3 else 'th'} "
+        f"image part is <image{index}>"
+        for index in range(1, count + 1)
+    )
+    if count == 1:
+        prompt_rule = (
+            "Do not use an image tag inside rewritten_prompt for this single-image request; "
+            "<image1> remains valid for ratio_follow."
+        )
+    else:
+        prompt_rule = (
+            "When rewritten_prompt refers to the inputs, use these exact tags and reference every "
+            "input image at least once; do not use natural-language numbering in their place."
+        )
+    return (
+        "# Runtime Image Mapping\n"
+        f"This request contains exactly {count} input image(s), in message order. {mapping}. "
+        f"The only valid image tags are: {valid_tags}. {prompt_rule} Never emit any other image tag."
+    )
+
+
 def build_prompt_rewrite_messages(
     profile: PromptRewriteProfile,
     system_prompt: str,
@@ -232,6 +336,12 @@ def build_prompt_rewrite_messages(
     if not profile.takes_images and images:
         raise ValueError("The t2i prompt-enhancer profile does not accept input images")
 
+    effective_system_prompt = str(system_prompt)
+    if profile.takes_images:
+        effective_system_prompt = (
+            effective_system_prompt.rstrip() + "\n\n" + build_edit_image_reference_rule(len(images))
+        )
+
     if images:
         user_content: str | list[dict[str, Any]] = [
             *({"type": "image_url", "image_url": {"url": image}} for image in images),
@@ -240,7 +350,7 @@ def build_prompt_rewrite_messages(
     else:
         user_content = user_prompt
     return [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": effective_system_prompt},
         {"role": "user", "content": user_content},
     ]
 
@@ -317,12 +427,37 @@ def parse_prompt_rewrite_json(
     if wh_ratio and not _RATIO.fullmatch(wh_ratio):
         raise PromptRewriteFormatError("wh_ratio must be empty or a positive W:H integer ratio")
 
+    prompt_references: list[int] = []
+    for candidate in _IMAGE_REFERENCE_CANDIDATE.findall(rewritten):
+        match = _IMAGE_REFERENCE.fullmatch(candidate)
+        if not match:
+            raise PromptRewriteFormatError(f"rewritten_prompt contains an invalid image reference: {candidate}")
+        image_index = int(match.group(1))
+        if image_index > image_count:
+            raise PromptRewriteFormatError(
+                f"rewritten_prompt references image {image_index}, but only {image_count} image(s) were supplied"
+            )
+        prompt_references.append(image_index)
+
     if not profile.takes_images:
+        if prompt_references:
+            raise PromptRewriteFormatError("t2i rewritten_prompt cannot contain image references")
         if not wh_ratio:
             raise PromptRewriteFormatError("t2i output requires a non-empty wh_ratio")
         if ratio_follow:
             raise PromptRewriteFormatError("t2i output cannot set ratio_follow")
     else:
+        if image_count == 1 and prompt_references:
+            raise PromptRewriteFormatError(
+                "single-image edit rewritten_prompt must refer to the image naturally, without <image1>"
+            )
+        if image_count >= 2:
+            missing_references = set(range(1, image_count + 1)) - set(prompt_references)
+            if missing_references:
+                missing = ", ".join(f"<image{index}>" for index in sorted(missing_references))
+                raise PromptRewriteFormatError(
+                    f"multi-image edit rewritten_prompt must reference every input image; missing: {missing}"
+                )
         if bool(wh_ratio) == bool(ratio_follow):
             raise PromptRewriteFormatError("edit output must set exactly one of wh_ratio and ratio_follow")
         if ratio_follow:
@@ -346,18 +481,25 @@ def _backend_completion(
     backend: Any,
     messages: list[dict[str, Any]],
     settings: dict[str, Any],
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     structured = getattr(backend, "chat_response", None)
     if callable(structured):
         completion = structured(messages, **settings)
         content = getattr(completion, "content", "")
         reported_thinking = str(getattr(completion, "reasoning", "") or "").strip()
+        finish_reason = str(getattr(completion, "finish_reason", "") or "").strip()
     else:
         content = backend.chat(messages, **settings)
         reported_thinking = ""
+        finish_reason = ""
     answer, inline_thinking = split_prompt_rewrite_thinking(content)
     thinking = "\n\n".join(part for part in (reported_thinking, inline_thinking) if part)
-    return answer, thinking
+    return answer, thinking, finish_reason
+
+
+def _generation_was_truncated(finish_reason: str) -> bool:
+    reason = str(finish_reason or "").strip().lower()
+    return reason in _TRUNCATED_FINISH_REASONS or "length" in reason or "max_token" in reason
 
 
 def rewrite_prompt(
@@ -370,35 +512,48 @@ def rewrite_prompt(
     image_data_urls: Iterable[str] = (),
     seed: int = 42,
 ) -> PromptRewriteResult:
-    """Run a Qwen PE request with one format-only retry."""
+    """Run a Qwen PE request with one format/truncation retry."""
 
     profile = get_prompt_rewrite_profile(task)
     prompt_text = load_system_prompt(system_prompt, system_prompt_path)
     images = tuple(image_data_urls)
     base_messages = build_prompt_rewrite_messages(profile, prompt_text, prompt, images)
-    settings = profile.request_settings(seed)
+    settings = {**profile.request_settings(seed), "accept_truncated_response": True}
     messages = list(base_messages)
     all_thinking: list[str] = []
     failures: list[str] = []
 
     for attempt in range(2):
-        answer, thinking = _backend_completion(backend, messages, settings)
+        attempt_settings = dict(settings)
+        if attempt:
+            attempt_settings["enable_thinking"] = False
+        answer, thinking, finish_reason = _backend_completion(backend, messages, attempt_settings)
         if thinking:
             all_thinking.append(thinking)
-        try:
-            parsed = parse_prompt_rewrite_json(answer, profile, image_count=len(images))
-        except PromptRewriteFormatError as exc:
-            failures.append(str(exc))
+        failure: PromptRewriteFormatError | None = None
+        parsed: dict[str, str] | None = None
+        if _generation_was_truncated(finish_reason):
+            failure = PromptRewriteFormatError(
+                f"generation was truncated (finish_reason={finish_reason or 'unknown'})"
+            )
+        else:
+            try:
+                parsed = parse_prompt_rewrite_json(answer, profile, image_count=len(images))
+            except PromptRewriteFormatError as exc:
+                failure = exc
+        if failure is not None:
+            failures.append(str(failure))
             if attempt == 1:
                 details = "; retry: ".join(failures)
                 raise PromptRewriteFormatError(
-                    "Qwen Prompt Enhancer returned invalid structured output twice: " + details
-                ) from exc
+                    "Qwen Prompt Enhancer failed structured output after one retry: " + details
+                ) from failure
             if profile.takes_images:
                 expected = (
                     'Use exactly the string fields "rewritten_prompt", "wh_ratio", and "ratio_follow". '
                     'Exactly one of "wh_ratio" and "ratio_follow" must be non-empty; a non-empty '
-                    'ratio_follow must look like "<image1>".'
+                    'ratio_follow must use one of the runtime image tags. Obey the Runtime Image Mapping '
+                    'rule for references inside rewritten_prompt.'
                 )
             else:
                 expected = (
@@ -407,17 +562,16 @@ def rewrite_prompt(
                 )
             messages = [
                 *base_messages,
-                {"role": "assistant", "content": answer},
                 {
                     "role": "user",
                     "content": (
-                        "Your previous answer did not match the required machine-readable format. "
-                        f"Return exactly one valid JSON object. {expected} Use no Markdown "
-                        "fence, commentary, or additional fields."
+                        "Retry the request without a thinking trace. Return the final JSON object only. "
+                        f"{expected} Use no Markdown fence, commentary, or additional fields."
                     ),
                 },
             ]
             continue
+        assert parsed is not None
         return PromptRewriteResult(
             rewritten_prompt=parsed["rewritten_prompt"],
             wh_ratio=parsed["wh_ratio"],
