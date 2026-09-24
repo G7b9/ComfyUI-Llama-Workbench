@@ -77,6 +77,7 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 | Llama Workbench Chat Output Display | 仅画布终端查看器，分别预览 Chat 节点的 `thinking` 和 `assistant_message` 输出。 |
 | Llama Workbench Chat Settings | 系统提示词、采样、上下文历史和图像尺寸控制。 |
 | Llama Workbench Skill Loader | 加载一个包内 Skill、自动选择 Skill，或进行普通聊天。 |
+| Llama Workbench Seed | 输出一个整数 seed，使用 ComfyUI 原生控件选择固定、随机、递增或递减。 |
 
 ## 可导入工作流
 

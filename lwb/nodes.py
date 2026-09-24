@@ -31,6 +31,7 @@ from .skills import (
     parse_flow_state,
     parse_skill_state,
 )
+from .seed import LlamaWorkbenchSeed
 
 
 BACKEND_TYPE = "LLAMA_WORKBENCH_BACKEND"
@@ -1510,6 +1511,7 @@ NODE_CLASS_MAPPINGS = {
     "LlamaWorkbench_SkillLoader": LlamaWorkbenchSkillLoader,
     "LlamaWorkbench_Chat": LlamaWorkbenchChat,
     "LlamaWorkbench_ChatDisplay": LlamaWorkbenchChatDisplay,
+    "LlamaWorkbench_Seed": LlamaWorkbenchSeed,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1528,4 +1530,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LlamaWorkbench_SkillLoader": "Llama Workbench Skill Loader",
     "LlamaWorkbench_Chat": "Llama Workbench Chat",
     "LlamaWorkbench_ChatDisplay": "Llama Workbench Chat Output Display",
+    "LlamaWorkbench_Seed": "Llama Workbench Seed",
 }
