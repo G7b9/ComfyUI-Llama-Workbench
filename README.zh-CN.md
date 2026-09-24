@@ -144,7 +144,8 @@ Canvas**。该节点会输出取整后的 `width`、`height`、诊断用 `ratio_
 Qwen-Image-2.1 `[1,64,H/16,W/16]` latent。`aspect_ratio_override` 可强制使用指定比例，
 但不会改写提示词。在 Edit 工作流中，`ratio_follow=<imageN>` 会选择对应顺序的参考图；
 `follow_input_size=true` 保留其取整后的输入尺寸，`false` 则仅保留其宽高比，并按指定
-百万像素预算计算画布。完整示例 `05_qwen-image-2.1-pe-t2i-gguf.json` 直接使用该 latent，
+百万像素预算计算画布。PE 也接受 `9:19.5` 这类有限小数比例，并在计算尺寸前规范化为
+最简整数比例（`6:13`）。完整示例 `05_qwen-image-2.1-pe-t2i-gguf.json` 直接使用该 latent，
 不再使用通用四通道 `EmptyLatentImage`；同时将 `rewritten_prompt` 接入 ComfyUI 原生
 Qwen-Image-2.1 生成链，在扩散采样前自动卸载 PE 服务，并保存生成图像。
 

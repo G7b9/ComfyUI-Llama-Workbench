@@ -168,7 +168,9 @@ PE Canvas**. It emits rounded `width` and `height`, a diagnostic
 the rewritten prompt. In edit workflows, `ratio_follow=<imageN>` selects that
 ordered reference image; `follow_input_size=true` preserves its rounded input
 size, while `false` preserves only its aspect ratio at the selected megapixel
-budget. The complete `05_qwen-image-2.1-pe-t2i-gguf.json` example uses this
+budget. The enhancer accepts finite-decimal aspect ratios such as `9:19.5` and
+normalizes them to the simplest integer form (`6:13`) before sizing. The complete
+`05_qwen-image-2.1-pe-t2i-gguf.json` example uses this
 latent directly rather than the generic four-channel `EmptyLatentImage`, wires
 `rewritten_prompt` into ComfyUI's native Qwen-Image-2.1 generation chain,
 auto-unloads the PE server before diffusion sampling, and saves the image.

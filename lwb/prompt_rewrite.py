@@ -15,6 +15,7 @@ import math
 import os
 import re
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -42,7 +43,8 @@ QWEN_IMAGE_21_ASPECT_RATIOS = (
     "1:3",
 )
 _THINK_BLOCK = re.compile(r"<think>\s*(.*?)\s*</think>", re.IGNORECASE | re.DOTALL)
-_RATIO = re.compile(r"^([1-9]\d*):([1-9]\d*)$")
+_RATIO_COMPONENT = r"(?:0\.\d+|[1-9]\d*(?:\.\d+)?)"
+_RATIO = re.compile(rf"^({_RATIO_COMPONENT}):({_RATIO_COMPONENT})$")
 _IMAGE_REFERENCE = re.compile(r"^<image([1-9]\d*)>$")
 _IMAGE_REFERENCE_CANDIDATE = re.compile(r"<image[^>]*>", re.IGNORECASE)
 _TRUNCATED_FINISH_REASONS = {"length", "limit", "max_tokens", "max_output_tokens"}
@@ -66,6 +68,23 @@ def _prompt_rewrite_debug_excerpt(value: Any) -> str:
     if len(text) > PROMPT_REWRITE_DEBUG_MAX_CHARS:
         text = text[:PROMPT_REWRITE_DEBUG_MAX_CHARS] + "...<truncated>"
     return repr(text)
+
+
+def _normalize_ratio(value: str) -> tuple[int, int, str]:
+    """Convert positive integer or finite-decimal W:H text to simplest integers."""
+
+    match = _RATIO.fullmatch(str(value or "").strip())
+    if not match:
+        raise ValueError("wh_ratio must be a positive W:H ratio with numeric components")
+    try:
+        width = Fraction(match.group(1))
+        height = Fraction(match.group(2))
+    except (TypeError, ValueError, ZeroDivisionError) as exc:
+        raise ValueError("wh_ratio must be a positive W:H ratio with numeric components") from exc
+    if width <= 0 or height <= 0:
+        raise ValueError("wh_ratio must be a positive W:H ratio with numeric components")
+    ratio = width / height
+    return ratio.numerator, ratio.denominator, f"{ratio.numerator}:{ratio.denominator}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,9 +197,10 @@ def prompt_rewrite_dimensions(
     ratio = str(wh_ratio or "").strip()
     if override and override != PROMPT_REWRITE_AUTO_ASPECT_RATIO:
         ratio = override
-    match = _RATIO.fullmatch(ratio)
-    if not match:
-        raise ValueError("wh_ratio must be a positive W:H integer ratio")
+    try:
+        ratio_width, ratio_height, normalized_ratio = _normalize_ratio(ratio)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
     try:
         target_megapixels = float(megapixels)
     except (TypeError, ValueError) as exc:
@@ -194,9 +214,6 @@ def prompt_rewrite_dimensions(
     if rounding_multiple <= 0:
         raise ValueError("multiple must be a positive integer")
 
-    ratio_width, ratio_height = (int(part) for part in match.groups())
-    divisor = math.gcd(ratio_width, ratio_height)
-    normalized_ratio = f"{ratio_width // divisor}:{ratio_height // divisor}"
     target_pixels = target_megapixels * 1024 * 1024
     scale = math.sqrt(target_pixels / (ratio_width * ratio_height))
     width = max(rounding_multiple, round(ratio_width * scale / rounding_multiple) * rounding_multiple)
@@ -443,8 +460,13 @@ def parse_prompt_rewrite_json(
     ratio_follow = value.get("ratio_follow", "").strip()
     if not rewritten:
         raise PromptRewriteFormatError("rewritten_prompt must not be empty")
-    if wh_ratio and not _RATIO.fullmatch(wh_ratio):
-        raise PromptRewriteFormatError("wh_ratio must be empty or a positive W:H integer ratio")
+    if wh_ratio:
+        try:
+            _, _, wh_ratio = _normalize_ratio(wh_ratio)
+        except ValueError as exc:
+            raise PromptRewriteFormatError(
+                "wh_ratio must be empty or a positive W:H ratio with numeric components"
+            ) from exc
 
     prompt_references: list[int] = []
     for candidate in _IMAGE_REFERENCE_CANDIDATE.findall(rewritten):
@@ -591,7 +613,8 @@ def rewrite_prompt(
             else:
                 expected = (
                     'Use exactly the string fields "rewritten_prompt" and "wh_ratio", with wh_ratio '
-                    'set to the selected positive W:H ratio.'
+                    'set to the selected positive W:H ratio; decimal components must be normalized to '
+                    'the simplest integer ratio.'
                 )
             messages = [
                 *base_messages,

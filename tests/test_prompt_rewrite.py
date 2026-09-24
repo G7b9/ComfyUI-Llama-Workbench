@@ -112,6 +112,31 @@ def test_strict_t2i_parser_normalizes_the_structured_outputs():
 
 
 @pytest.mark.parametrize(
+    "raw_ratio,normalized_ratio",
+    [("9:19.5", "6:13"), ("1.5:1", "3:2"), ("1920:1080", "16:9")],
+)
+def test_parser_normalizes_decimal_and_non_reduced_ratios(raw_ratio, normalized_ratio):
+    parsed = parse_prompt_rewrite_json(
+        json.dumps({"rewritten_prompt": "a detailed scene", "wh_ratio": raw_ratio}),
+        PROMPT_REWRITE_PROFILES["t2i"],
+    )
+
+    assert parsed["wh_ratio"] == normalized_ratio
+
+
+def test_rewrite_prompt_accepts_decimal_ratio_without_retry():
+    backend = SequenceBackend(
+        ChatResponse(content='{"rewritten_prompt":"vertical scene","wh_ratio":"9:19.5"}')
+    )
+
+    result = rewrite_prompt(backend, "vertical scene", system_prompt="user supplied")
+
+    assert result.wh_ratio == "6:13"
+    assert result.retried is False
+    assert len(backend.calls) == 1
+
+
+@pytest.mark.parametrize(
     "answer,match",
     [
         ('```json\n{"rewritten_prompt":"x","wh_ratio":"1:1"}\n```', "single valid JSON"),
@@ -259,7 +284,7 @@ def test_debug_logging_prints_bounded_answers_and_validation_errors(monkeypatch,
     assert "attempt=1" in output
     assert 'wh_ratio":"16/9' in output
     assert 'wh_ratio":"16：9' in output
-    assert "validation_error=wh_ratio must be empty or a positive W:H integer ratio" in output
+    assert "validation_error=wh_ratio must be empty or a positive W:H ratio with numeric components" in output
 
 
 def test_debug_logging_can_be_enabled_per_request(monkeypatch, capsys):
@@ -350,6 +375,14 @@ def test_prompt_rewrite_dimensions_preserve_ratio_and_pixel_budget():
 def test_prompt_rewrite_dimensions_reject_invalid_ratios(ratio):
     with pytest.raises(ValueError, match="positive W:H"):
         prompt_rewrite_dimensions(ratio)
+
+
+def test_prompt_rewrite_dimensions_accepts_decimal_ratios():
+    width, height, ratio = prompt_rewrite_dimensions("9:19.5", megapixels=1.0, multiple=8)
+
+    assert ratio == "6:13"
+    assert width % 8 == height % 8 == 0
+    assert width / height == pytest.approx(6 / 13, rel=0.02)
 
 
 def test_qwen_pe_resolution_node_is_registered_and_uses_force_input():
