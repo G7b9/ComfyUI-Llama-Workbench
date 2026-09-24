@@ -70,7 +70,7 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 | Llama Workbench Embedded VL Model | 可选的 `llama-cpp-python` 直接加载器，适用于 Qwen/Gemma 风格模型。 |
 | Llama Workbench Release Embedded Model | 显式关闭嵌入式模型。 |
 | Llama Workbench Prompt / Image2Prompt | 通过统一后端 socket 进行文本提示或图像反推提示词。图像 socket 会随着连接从 `image` 变为 `image1`、`image2` 等，最多 10 个；还提供 `seed`、`max_images`、`max_image_edge`、`auto_unload` 以及默认关闭的 `thinking` 控制。 |
-| Llama Workbench Qwen Image 2.1 Prompt Enhancer | 通过 Workbench backend 原生执行结构化提示词改写。使用官方 T2I/edit 采样 profile，校验 `rewritten_prompt`、`wh_ratio`、`ratio_follow` 及编辑图片引用；格式错误或生成被截断时，会关闭 thinking 并最多重试一次。匹配的 System Prompt 必须由用户粘贴或从本地文件加载。 |
+| Llama Workbench Qwen Image 2.1 Prompt Enhancer | 通过 Workbench backend 原生执行结构化提示词改写。使用官方 T2I/edit 采样 profile，校验 `rewritten_prompt`、`wh_ratio`、`ratio_follow` 及编辑图片引用；格式错误或生成被截断时，会关闭 thinking 并最多重试一次。匹配的 System Prompt 必须由用户粘贴或从本地文件加载。节点提供 `debug` 复选框，可打印限长原始 answer 和校验错误。 |
 | Llama Workbench Qwen Image 2.1 PE Canvas | 解析 `wh_ratio`、`ratio_follow=<imageN>`、可选手动比例覆盖和 `follow_input_size`，输出宽、高、`ratio_source` 以及原生 `[1,64,H/16,W/16]` Qwen-Image-2.1 `LATENT`。 |
 | Llama Workbench Qwen Image 2.1 PE Resolution | 为已有工作流保留的仅尺寸兼容节点。新的 Qwen-Image-2.1 工作流应使用 PE Canvas，确保 KSampler 收到正确的 64 通道 latent。 |
 | Llama Workbench Chat | 交互式本地聊天：输入文本后点击节点上的 **发送** 按钮，只会将此 Chat 节点及其上游依赖加入队列，不需要点击 Queue Prompt。节点有实用的初始尺寸，可以自由调整大小，长历史记录会在可滚动的画布区域中显示。`clear_context_before_run` 默认开启，每次排队的工作流都会从新上下文开始；关闭后可继续多轮对话。`use_cache` 默认开启，会独立于 `seed` 重用未变化的完整请求；关闭后可强制新的模型请求。缓存开启时会跳过 `release_comfy_cache_after_run`，以便继续复用响应。`release_owned_server_after_run` 默认开启，Chat 响应后会立即停止自有 llama-server，再让下游 H3/视频节点分配显存。节点包含 **清空上下文** / **清空输入** 操作和文本 token 上下文计量器。Start Server 会自动提供计量器所需的 `context_size`；外部 Connection 需要设置 `context_size` 才能显示百分比。还支持图持久化历史、直接的 `max_tokens` / `seed` / `thinking` / `auto_unload` 控制，以及带 `max_image_edge` 的动态图像 socket（最多 10 张）。 |
@@ -133,6 +133,11 @@ JSON 对象，不接受 Markdown 代码围栏、对象外文本、修复后的 J
 输出，同时提供 `result_json`。第一次格式错误或服务端截断生成时会触发一次纠正重试；
 重试会关闭 thinking，并只要求最终 JSON。第二次仍失败就停止工作流，不会把不可靠文本
 静默传给下游。
+
+如需临时查看 Prompt Enhancer 的原始输出，可勾选节点上的 `debug`，或在启动 ComfyUI
+前设置环境变量 `LWB_PROMPT_REWRITE_DEBUG=1`。ComfyUI 后台会打印每次尝试的限长
+answer（包括返回的 `wh_ratio`）、finish reason 和校验错误。两者默认关闭；修改环境变量后
+需要重启 ComfyUI。
 
 将 `wh_ratio` 和 `ratio_follow` 同时连接到 **Llama Workbench Qwen Image 2.1 PE
 Canvas**。该节点会输出取整后的 `width`、`height`、诊断用 `ratio_source`，以及原生

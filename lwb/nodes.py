@@ -814,7 +814,16 @@ class LlamaWorkbenchPromptEnhancer:
                     },
                 ),
             },
-            "optional": images,
+            "optional": {
+                **images,
+                "debug": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": "Print bounded Prompt Enhancer answers and validation errors in the ComfyUI console.",
+                    },
+                ),
+            },
         }
 
     def enhance(
@@ -829,6 +838,7 @@ class LlamaWorkbenchPromptEnhancer:
         max_image_edge=PE_EDIT_IMAGE_MAX_EDGE,
         auto_unload=False,
         max_image_pixels=PE_EDIT_IMAGE_PIXEL_BUDGET,
+        debug=False,
         image=None,
         image1=None,
         image2=None,
@@ -884,6 +894,7 @@ class LlamaWorkbenchPromptEnhancer:
                 system_prompt_path=str(system_prompt_path),
                 image_data_urls=image_urls,
                 seed=_safe_int(seed, 42, -1),
+                debug=bool(debug),
             )
         finally:
             _auto_unload_backend(backend, auto_unload)

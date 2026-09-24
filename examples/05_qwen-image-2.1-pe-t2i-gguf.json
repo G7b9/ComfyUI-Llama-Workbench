@@ -66,7 +66,8 @@
         {"name": "max_image_edge", "type": "INT", "widget": {"name": "max_image_edge"}, "link": null},
         {"name": "auto_unload", "type": "BOOLEAN", "widget": {"name": "auto_unload"}, "link": null},
         {"name": "max_image_pixels", "type": "INT", "widget": {"name": "max_image_pixels"}, "link": null},
-        {"name": "image", "type": "IMAGE", "link": null}
+        {"name": "image", "type": "IMAGE", "link": null},
+        {"name": "debug", "type": "BOOLEAN", "widget": {"name": "debug"}, "link": null}
       ],
       "outputs": [
         {"name": "rewritten_prompt", "type": "STRING", "links": [2]},
@@ -87,7 +88,8 @@
         10,
         0,
         true,
-        1048576
+        1048576,
+        false
       ]
     },
     {

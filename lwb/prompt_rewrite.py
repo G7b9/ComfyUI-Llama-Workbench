@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,8 @@ from typing import Any, Iterable
 
 MAX_PROMPT_REWRITE_IMAGES = 10
 MAX_SYSTEM_PROMPT_BYTES = 1024 * 1024
+PROMPT_REWRITE_DEBUG_ENV = "LWB_PROMPT_REWRITE_DEBUG"
+PROMPT_REWRITE_DEBUG_MAX_CHARS = 4000
 PROMPT_REWRITE_AUTO_ASPECT_RATIO = "Auto (use Prompt Enhancer)"
 QWEN_IMAGE_21_ASPECT_RATIOS = (
     "1:1",
@@ -47,6 +50,22 @@ _TRUNCATED_FINISH_REASONS = {"length", "limit", "max_tokens", "max_output_tokens
 
 class PromptRewriteFormatError(ValueError):
     """The model did not return the declared prompt-enhancer JSON contract."""
+
+
+def _prompt_rewrite_debug_enabled(explicit: bool = False) -> bool:
+    if explicit:
+        return True
+    value = os.environ.get(PROMPT_REWRITE_DEBUG_ENV, "")
+    return value.strip().lower() in {"1", "true", "yes", "on", "debug"}
+
+
+def _prompt_rewrite_debug_excerpt(value: Any) -> str:
+    """Return a bounded repr suitable for the ComfyUI console."""
+
+    text = str(value or "")
+    if len(text) > PROMPT_REWRITE_DEBUG_MAX_CHARS:
+        text = text[:PROMPT_REWRITE_DEBUG_MAX_CHARS] + "...<truncated>"
+    return repr(text)
 
 
 @dataclass(frozen=True, slots=True)
@@ -511,6 +530,7 @@ def rewrite_prompt(
     system_prompt_path: str = "",
     image_data_urls: Iterable[str] = (),
     seed: int = 42,
+    debug: bool = False,
 ) -> PromptRewriteResult:
     """Run a Qwen PE request with one format/truncation retry."""
 
@@ -528,6 +548,13 @@ def rewrite_prompt(
         if attempt:
             attempt_settings["enable_thinking"] = False
         answer, thinking, finish_reason = _backend_completion(backend, messages, attempt_settings)
+        if _prompt_rewrite_debug_enabled(debug):
+            print(
+                "[Llama Workbench][Prompt Enhancer][debug] "
+                f"attempt={attempt + 1} finish_reason={finish_reason or 'unknown'} "
+                f"thinking_chars={len(thinking)} answer={_prompt_rewrite_debug_excerpt(answer)}",
+                flush=True,
+            )
         if thinking:
             all_thinking.append(thinking)
         failure: PromptRewriteFormatError | None = None
@@ -542,6 +569,12 @@ def rewrite_prompt(
             except PromptRewriteFormatError as exc:
                 failure = exc
         if failure is not None:
+            if _prompt_rewrite_debug_enabled(debug):
+                print(
+                    "[Llama Workbench][Prompt Enhancer][debug] "
+                    f"attempt={attempt + 1} validation_error={failure}",
+                    flush=True,
+                )
             failures.append(str(failure))
             if attempt == 1:
                 details = "; retry: ".join(failures)

@@ -78,7 +78,7 @@ long reasoning or unlimited-token responses.
 | Llama Workbench Embedded VL Model | Optional direct `llama-cpp-python` loader for Qwen/Gemma-style models. |
 | Llama Workbench Release Embedded Model | Closes an embedded model explicitly. |
 | Llama Workbench Prompt / Image2Prompt | Text prompting and image-to-prompt from a unified backend socket. Its image socket grows from `image` to `image1`, `image2`, and so on as connections are added (up to 10). It also has `seed`, `max_images`, `max_image_edge`, `auto_unload`, and a `thinking` control that defaults to `off`. |
-| Llama Workbench Qwen Image 2.1 Prompt Enhancer | Native structured prompt rewriting over a Workbench backend. It uses the official T2I/edit sampling profiles, validates `rewritten_prompt`, `wh_ratio`, `ratio_follow`, and edit image references, and retries one malformed or truncated response with thinking disabled. The matching System Prompt must be pasted or loaded from a local file. |
+| Llama Workbench Qwen Image 2.1 Prompt Enhancer | Native structured prompt rewriting over a Workbench backend. It uses the official T2I/edit sampling profiles, validates `rewritten_prompt`, `wh_ratio`, `ratio_follow`, and edit image references, and retries one malformed or truncated response with thinking disabled. The matching System Prompt must be pasted or loaded from a local file. A `debug` checkbox can print bounded raw answers and validation errors. |
 | Llama Workbench Qwen Image 2.1 PE Canvas | Resolves `wh_ratio`, `ratio_follow=<imageN>`, an optional manual ratio override, and `follow_input_size`, then emits width, height, `ratio_source`, and a native `[1,64,H/16,W/16]` Qwen-Image-2.1 `LATENT`. |
 | Llama Workbench Qwen Image 2.1 PE Resolution | Compatibility dimensions-only helper for existing workflows. New Qwen-Image-2.1 workflows should use PE Canvas so KSampler receives the correct 64-channel latent. |
 | Llama Workbench Chat | Interactive local chat: enter text and click its on-node **发送** button to queue only this Chat node and its upstream dependencies (no Queue Prompt click); it starts at a practical default size, remains freely resizable, and keeps long history in a scrollable canvas viewport. `clear_context_before_run` defaults to on, so every queued workflow starts fresh; turn it off for a continuing multi-turn conversation. `use_cache` defaults to on and reuses an unchanged complete request independently of `seed`; turn it off to force a fresh model request. While it is on, `release_comfy_cache_after_run` is skipped so the response remains reusable. `release_owned_server_after_run` defaults to on and stops an owned llama-server immediately after Chat responds, before downstream H3/video nodes allocate VRAM. **清空上下文** / **清空输入** actions and a text-token context meter are included. Start Server supplies the meter's `context_size` automatically; set `context_size` on an external Connection to obtain a percentage. Graph-persisted history, direct `max_tokens` / `seed` / `thinking` / `auto_unload` controls, and dynamic image sockets (up to 10) with `max_image_edge` are also included. |
@@ -154,6 +154,12 @@ exposes `rewritten_prompt`, `wh_ratio`, and the normalized empty
 a generation truncated by the server gets one corrective retry. That retry
 turns thinking off and asks only for the final JSON; a second failure stops the
 workflow instead of silently passing unreliable text downstream.
+
+For temporary Prompt Enhancer output diagnostics, either enable the node's
+`debug` checkbox or set the environment variable `LWB_PROMPT_REWRITE_DEBUG=1`
+before starting ComfyUI. The ComfyUI console then prints each bounded answer
+(including the returned `wh_ratio`), finish reason, and validation error. Both
+are off by default; restart ComfyUI after changing its environment.
 
 Connect both `wh_ratio` and `ratio_follow` to **Llama Workbench Qwen Image 2.1
 PE Canvas**. It emits rounded `width` and `height`, a diagnostic

@@ -19,6 +19,7 @@ from lwb.prompt_rewrite import (
     PROMPT_REWRITE_AUTO_ASPECT_RATIO,
     QWEN_IMAGE_21_ASPECT_RATIOS,
     PromptRewriteFormatError,
+    PROMPT_REWRITE_DEBUG_ENV,
     build_edit_image_reference_rule,
     build_prompt_rewrite_messages,
     load_system_prompt,
@@ -244,6 +245,33 @@ def test_second_format_failure_is_terminal():
     assert len(backend.calls) == 2
 
 
+def test_debug_logging_prints_bounded_answers_and_validation_errors(monkeypatch, capsys):
+    monkeypatch.setenv(PROMPT_REWRITE_DEBUG_ENV, "1")
+    backend = SequenceBackend(
+        ChatResponse(content='{"rewritten_prompt":"first","wh_ratio":"16/9"}'),
+        ChatResponse(content='{"rewritten_prompt":"second","wh_ratio":"16：9"}'),
+    )
+
+    with pytest.raises(PromptRewriteFormatError):
+        rewrite_prompt(backend, "corgi", system_prompt="user supplied")
+
+    output = capsys.readouterr().out
+    assert "attempt=1" in output
+    assert 'wh_ratio":"16/9' in output
+    assert 'wh_ratio":"16：9' in output
+    assert "validation_error=wh_ratio must be empty or a positive W:H integer ratio" in output
+
+
+def test_debug_logging_can_be_enabled_per_request(monkeypatch, capsys):
+    monkeypatch.delenv(PROMPT_REWRITE_DEBUG_ENV, raising=False)
+    backend = SequenceBackend(ChatResponse(content="bad"), ChatResponse(content="still bad"))
+
+    with pytest.raises(PromptRewriteFormatError):
+        rewrite_prompt(backend, "corgi", system_prompt="user supplied", debug=True)
+
+    assert "[Llama Workbench][Prompt Enhancer][debug]" in capsys.readouterr().out
+
+
 def test_prompt_enhancer_node_is_registered_and_returns_separate_fields():
     backend = SequenceBackend(
         ChatResponse(content='{"rewritten_prompt":"expanded","wh_ratio":"1:1"}', reasoning="think")
@@ -252,6 +280,7 @@ def test_prompt_enhancer_node_is_registered_and_returns_separate_fields():
 
     assert NODE_CLASS_MAPPINGS["LlamaWorkbench_PromptEnhancer"] is LlamaWorkbenchPromptEnhancer
     assert {"image", *(f"image{index}" for index in range(1, 11))} <= set(node_inputs["optional"])
+    assert node_inputs["optional"]["debug"][1]["default"] is False
     output = LlamaWorkbenchPromptEnhancer().enhance(
         backend,
         "short",

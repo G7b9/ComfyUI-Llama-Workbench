@@ -75,7 +75,8 @@
         {"name": "image7", "type": "IMAGE", "link": 8},
         {"name": "image8", "type": "IMAGE", "link": 9},
         {"name": "image9", "type": "IMAGE", "link": 10},
-        {"name": "image10", "type": "IMAGE", "link": 11}
+        {"name": "image10", "type": "IMAGE", "link": 11},
+        {"name": "debug", "type": "BOOLEAN", "widget": {"name": "debug"}, "link": null}
       ],
       "outputs": [
         {"name": "rewritten_prompt", "type": "STRING", "links": null},
@@ -96,7 +97,8 @@
         10,
         4096,
         true,
-        1048576
+        1048576,
+        false
       ]
     },
     {
