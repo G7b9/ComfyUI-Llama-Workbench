@@ -141,6 +141,16 @@ def test_strict_t2i_parser_normalizes_the_structured_outputs():
     }
 
 
+def test_parser_accepts_one_outer_json_markdown_fence():
+    parsed = parse_prompt_rewrite_json(
+        '```json\n{"rewritten_prompt":"a detailed scene","wh_ratio":"16:9"}\n```',
+        PROMPT_REWRITE_PROFILES["t2i"],
+    )
+
+    assert parsed["rewritten_prompt"] == "a detailed scene"
+    assert parsed["wh_ratio"] == "16:9"
+
+
 @pytest.mark.parametrize(
     "raw_ratio,normalized_ratio",
     [("9:19.5", "6:13"), ("1.5:1", "3:2"), ("1920:1080", "16:9")],
@@ -166,6 +176,18 @@ def test_rewrite_prompt_accepts_decimal_ratio_without_retry():
     assert len(backend.calls) == 1
 
 
+def test_rewrite_prompt_accepts_fenced_json_without_retry():
+    backend = SequenceBackend(
+        ChatResponse(content='```json\n{"rewritten_prompt":"fenced scene","wh_ratio":"1:1"}\n```')
+    )
+
+    result = rewrite_prompt(backend, "fenced scene", system_prompt="user supplied")
+
+    assert result.rewritten_prompt == "fenced scene"
+    assert result.retried is False
+    assert len(backend.calls) == 1
+
+
 def test_rewrite_prompt_can_disable_thinking():
     backend = SequenceBackend(
         ChatResponse(content='{"rewritten_prompt":"direct answer","wh_ratio":"1:1"}')
@@ -180,7 +202,8 @@ def test_rewrite_prompt_can_disable_thinking():
 @pytest.mark.parametrize(
     "answer,match",
     [
-        ('```json\n{"rewritten_prompt":"x","wh_ratio":"1:1"}\n```', "single valid JSON"),
+        ('Here is the JSON:\n```json\n{"rewritten_prompt":"x","wh_ratio":"1:1"}\n```', "single valid JSON"),
+        ('```python\n{"rewritten_prompt":"x","wh_ratio":"1:1"}\n```', "single valid JSON"),
         ('{"rewritten_prompt":"x","wh_ratio":"1:1","extra":true}', "unexpected"),
         ('{"rewritten_prompt":"x","wh_ratio":"1:1","wh_ratio":"3:2"}', "repeats"),
         ('{"rewritten_prompt":"x","wh_ratio":""}', "non-empty wh_ratio"),

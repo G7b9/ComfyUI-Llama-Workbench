@@ -85,7 +85,7 @@ long reasoning or unlimited-token responses.
 | Llama Workbench Chat Output Display | Canvas-only terminal viewer that separately previews a Chat node's `thinking` and `assistant_message` outputs. |
 | Llama Workbench Chat Settings | System prompt, sampling, context-history, and image-size controls. |
 | Llama Workbench Skill Loader | Loads one package-local Skill, Auto selection, or normal chat. |
-| Llama Workbench Seed | Outputs an integer seed using ComfyUI's native fixed, random, increment, and decrement controls. |
+| Llama Workbench Seed | Outputs an integer seed with one-click fixed random, randomize-each-run, increment, decrement, and fixed controls. |
 
 ## Importable workflows
 

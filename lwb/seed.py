@@ -27,7 +27,7 @@ class LlamaWorkbenchSeed:
                         "min": 0,
                         "max": SEED_MAX,
                         "control_after_generate": True,
-                        "tooltip": "Use ComfyUI's native control to keep the seed fixed, randomize it, or increment/decrement it after generation.",
+                        "tooltip": "Use the node buttons or ComfyUI's native control to keep the seed fixed, randomize it, or increment/decrement it after generation.",
                     },
                 ),
             }

@@ -43,6 +43,10 @@ QWEN_IMAGE_21_ASPECT_RATIOS = (
     "1:3",
 )
 _THINK_BLOCK = re.compile(r"<think>\s*(.*?)\s*</think>", re.IGNORECASE | re.DOTALL)
+_JSON_CODE_FENCE = re.compile(
+    r"^```[ \t]*(?:json[ \t]*)?\r?\n(?P<body>.*?)\r?\n```[ \t]*$",
+    re.IGNORECASE | re.DOTALL,
+)
 _RATIO_COMPONENT = r"(?:0\.\d+|[1-9]\d*(?:\.\d+)?)"
 _RATIO = re.compile(rf"^({_RATIO_COMPONENT}):({_RATIO_COMPONENT})$")
 _IMAGE_REFERENCE = re.compile(r"^<image([1-9]\d*)>$")
@@ -547,6 +551,18 @@ def split_prompt_rewrite_thinking(text: Any) -> tuple[str, str]:
     return raw, ""
 
 
+def _unwrap_json_code_fence(raw: str) -> str:
+    """Remove one complete outer JSON Markdown fence, if present.
+
+    Qwen PE sometimes follows the JSON instruction semantically but still
+    formats the object as a Markdown code block. The JSON object itself is
+    still parsed strictly after this narrow compatibility normalization.
+    """
+
+    match = _JSON_CODE_FENCE.fullmatch(raw)
+    return match.group("body").strip() if match else raw
+
+
 def parse_prompt_rewrite_json(
     answer: str,
     profile: PromptRewriteProfile,
@@ -556,11 +572,12 @@ def parse_prompt_rewrite_json(
     """Strictly parse and validate one PE answer.
 
     Unlike a chat-oriented best-effort parser, this function accepts no prose,
-    Markdown fences, repaired JSON, aliases, or unknown fields.  Downstream
-    image nodes must be able to trust every returned field.
+    repaired JSON, aliases, or unknown fields. A single outer JSON Markdown
+    fence is tolerated because Qwen PE occasionally emits one despite the
+    raw-JSON instruction. Downstream image nodes can trust every field.
     """
 
-    raw = str(answer or "").strip()
+    raw = _unwrap_json_code_fence(str(answer or "").strip())
     if not raw:
         raise PromptRewriteFormatError("assistant answer is empty")
 

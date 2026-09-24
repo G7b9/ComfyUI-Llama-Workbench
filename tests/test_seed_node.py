@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from lwb.nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
@@ -29,3 +31,20 @@ def test_seed_node_rejects_invalid_seed(seed):
 def test_seed_node_is_registered_with_a_namespaced_display_name():
     assert NODE_CLASS_MAPPINGS["LlamaWorkbench_Seed"] is LlamaWorkbenchSeed
     assert NODE_DISPLAY_NAME_MAPPINGS["LlamaWorkbench_Seed"] == "Llama Workbench Seed"
+
+
+def test_seed_frontend_adds_quick_controls_without_replacing_node_type():
+    source = (Path(__file__).parents[1] / "web" / "seed.js").read_text(encoding="utf-8")
+
+    assert 'name: "LlamaWorkbench.SeedControls"' in source
+    assert "beforeRegisterNodeDef" in source
+    assert "nodeData.name !== SEED_NODE" in source
+    assert 'node.addWidget("button"' in source
+    assert '"🎲 New Fixed Random"' in source
+    assert '"🎲 Randomize Each Run"' in source
+    assert '"+ Increment Each Run"' in source
+    assert '"- Decrement Each Run"' in source
+    assert '"🔒 Keep Fixed"' in source
+    assert "control_after_generate" in source
+    assert "globalThis.crypto.getRandomValues" in source
+    assert "LiteGraph.registerNodeType" not in source
