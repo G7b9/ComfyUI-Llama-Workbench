@@ -330,6 +330,7 @@ class OwnedServer:
             url,
             timeout_seconds=float(timeout_seconds),
             label="owned llama-server",
+            model_path=str(Path(config.model_path).expanduser().resolve()),
             owned_by_workbench=True,
             context_size=config.context_size,
             diagnostic_provider=self.request_diagnostics,

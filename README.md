@@ -78,7 +78,7 @@ long reasoning or unlimited-token responses.
 | Llama Workbench Embedded VL Model | Optional direct `llama-cpp-python` loader for Qwen/Gemma-style models. |
 | Llama Workbench Release Embedded Model | Closes an embedded model explicitly. |
 | Llama Workbench Prompt / Image2Prompt | Text prompting and image-to-prompt from a unified backend socket. Its image socket grows from `image` to `image1`, `image2`, and so on as connections are added (up to 10). It also has `seed`, `max_images`, `max_image_edge`, `auto_unload`, and a `thinking` control that defaults to `off`. |
-| Llama Workbench Qwen Image 2.1 Prompt Enhancer | Native structured prompt rewriting over a Workbench backend. It uses the official T2I/edit sampling profiles, validates `rewritten_prompt`, `wh_ratio`, `ratio_follow`, and edit image references, and retries one malformed or truncated response with thinking disabled. The matching System Prompt must be pasted or loaded from a local file. A `debug` checkbox can print bounded raw answers and validation errors. |
+| Llama Workbench Qwen Image 2.1 Prompt Enhancer | Native structured prompt rewriting over a Workbench backend. It uses the official T2I/edit sampling profiles, validates `rewritten_prompt`, `wh_ratio`, `ratio_follow`, and edit image references, and exposes a default-on `thinking` switch. A malformed or truncated response gets one retry with thinking disabled. Task-specific System Prompts can be pasted, loaded from a file, or discovered next to a local model. A `debug` checkbox can print bounded raw answers and validation errors. |
 | Llama Workbench Qwen Image 2.1 PE Canvas | Resolves `wh_ratio`, `ratio_follow=<imageN>`, an optional manual ratio override, and `follow_input_size`, then emits width, height, `ratio_source`, and a native `[1,64,H/16,W/16]` Qwen-Image-2.1 `LATENT`. |
 | Llama Workbench Qwen Image 2.1 PE Resolution | Compatibility dimensions-only helper for existing workflows. New Qwen-Image-2.1 workflows should use PE Canvas so KSampler receives the correct 64-channel latent. |
 | Llama Workbench Chat | Interactive local chat: enter text and click its on-node **发送** button to queue only this Chat node and its upstream dependencies (no Queue Prompt click); it starts at a practical default size, remains freely resizable, and keeps long history in a scrollable canvas viewport. `clear_context_before_run` defaults to on, so every queued workflow starts fresh; turn it off for a continuing multi-turn conversation. `use_cache` defaults to on and reuses an unchanged complete request independently of `seed`; turn it off to force a fresh model request. While it is on, `release_comfy_cache_after_run` is skipped so the response remains reusable. `release_owned_server_after_run` defaults to on and stops an owned llama-server immediately after Chat responds, before downstream H3/video nodes allocate VRAM. **清空上下文** / **清空输入** actions and a text-token context meter are included. Start Server supplies the meter's `context_size` automatically; set `context_size` on an external Connection to obtain a percentage. Graph-persisted history, direct `max_tokens` / `seed` / `thinking` / `auto_unload` controls, and dynamic image sockets (up to 10) with `max_image_edge` are also included. |
@@ -134,11 +134,18 @@ GGUF, then connect its backend to **Llama Workbench Qwen Image 2.1 Prompt
 Enhancer**. Phase-one testing targets
 [`pottokao/Qwen-Image-2.1-PE-T2I-Heretic-GGUF`](https://huggingface.co/pottokao/Qwen-Image-2.1-PE-T2I-Heretic-GGUF).
 Select `t2i`, leave all image sockets disconnected, and provide the matching
-Qwen PE System Prompt through exactly one of:
+Qwen PE System Prompt. The node selects the task-specific prompt automatically:
 
-- `system_prompt`: paste the prompt into the node.
-- `system_prompt_path`: point to a local UTF-8 `system_prompt.txt`, or to the
-  local model directory that contains that file.
+- `t2i_system_prompt` / `edit_system_prompt`: paste an official prompt for each task.
+- `t2i_system_prompt_path` / `edit_system_prompt_path`: point each task at a prompt file or model directory.
+- `system_prompt` / `system_prompt_path`: legacy current-task override inputs retained for old workflows.
+- `auto_load_system_prompt`: enabled by default; with no manual override, search the Start Server or
+  Embedded model directory for `system_prompt_t2i.txt`, `system_prompt_edit.txt`, then fall back to
+  `system_prompt.txt`.
+
+Task-specific inputs take precedence over the legacy generic inputs. Switching `task` also switches
+the prompt filename, sampling profile, and output validation, but it does not switch the model already
+loaded by the backend: `t2i` must use PE-T2I and `edit` must use PE-I2I with its matching mmproj.
 
 The repository intentionally includes neither Qwen's official System Prompt
 nor the model weights. They remain governed by their upstream license and are
@@ -147,7 +154,9 @@ not MIT assets from this project.
 The node owns the PE request contract rather than asking users to copy sampling
 values into a generic Prompt node. Its `t2i` profile sends `temperature=1.0`,
 `top_p=0.95`, `top_k=20`, `min_p=0`, `presence_penalty=1.5`,
-`max_tokens=16256`, and `enable_thinking=true`. It parses exactly one JSON
+`max_tokens=16256`, and `enable_thinking=true` when the node's `thinking` is `on`.
+Set `thinking` to `off` to request the final JSON without the reasoning pass, which
+reduces latency and token use but may reduce rewrite quality. It parses exactly one JSON
 object—no Markdown fences, prose, repaired JSON, aliases, or unknown fields—and
 exposes `rewritten_prompt`, `wh_ratio`, and the normalized empty
 `ratio_follow` as separate sockets plus `result_json`. A formatting failure or

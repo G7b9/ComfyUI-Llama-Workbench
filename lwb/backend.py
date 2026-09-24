@@ -85,6 +85,10 @@ class ServerBackend:
     timeout_seconds: float = 120.0
     label: str = "llama-server"
     model_name: str = ""
+    # Set by Start Server when the local checkpoint path is known. External
+    # Connection backends intentionally leave this empty because a remote
+    # server may route requests to a model the client cannot inspect.
+    model_path: str = ""
     owned_by_workbench: bool = False
     context_size: int = 0
     use_environment_proxy: bool = False
@@ -279,6 +283,7 @@ class EmbeddedBackend:
 
     llm: Any
     label: str = "embedded llama-cpp-python"
+    model_path: str = ""
     ensure_available: Callable[[], "EmbeddedBackend"] | None = field(default=None, repr=False, compare=False)
     _active_backend: "EmbeddedBackend | None" = field(default=None, repr=False, compare=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)

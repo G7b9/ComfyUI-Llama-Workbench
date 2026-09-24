@@ -766,14 +766,21 @@ class LlamaWorkbenchPromptEnhancer:
                     {
                         "default": "",
                         "multiline": True,
-                        "placeholder": "Paste the matching Qwen PE system prompt, or use system_prompt_path",
+                        "placeholder": "Optional current-task override; task-specific prompt fields take priority",
                     },
                 ),
                 "system_prompt_path": (
                     "STRING",
                     {
                         "default": "",
-                        "placeholder": "local system_prompt.txt or its containing directory",
+                        "placeholder": "Optional current-task file or prompt directory",
+                    },
+                ),
+                "thinking": (
+                    ["off", "on"],
+                    {
+                        "default": "on",
+                        "tooltip": "Enable the PE model's reasoning pass before it emits the structured JSON. Turn off for lower latency and token use.",
                     },
                 ),
                 "seed": ("INT", {"default": 42, "min": -1, "max": 0x7FFFFFFF, "control_after_generate": True}),
@@ -816,6 +823,43 @@ class LlamaWorkbenchPromptEnhancer:
             },
             "optional": {
                 **images,
+                "t2i_system_prompt": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": True,
+                        "placeholder": "Optional official PE-T2I prompt override",
+                    },
+                ),
+                "edit_system_prompt": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": True,
+                        "placeholder": "Optional official PE-I2I prompt override",
+                    },
+                ),
+                "t2i_system_prompt_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "placeholder": "Optional PE-T2I prompt file or checkpoint directory",
+                    },
+                ),
+                "edit_system_prompt_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "placeholder": "Optional PE-I2I prompt file or checkpoint directory",
+                    },
+                ),
+                "auto_load_system_prompt": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "When enabled, select the task-specific system_prompt file next to the local model if no manual prompt is supplied.",
+                    },
+                ),
                 "debug": (
                     "BOOLEAN",
                     {
@@ -833,11 +877,17 @@ class LlamaWorkbenchPromptEnhancer:
         task,
         system_prompt,
         system_prompt_path,
+        thinking="on",
         seed=42,
         max_images=10,
         max_image_edge=PE_EDIT_IMAGE_MAX_EDGE,
         auto_unload=False,
         max_image_pixels=PE_EDIT_IMAGE_PIXEL_BUDGET,
+        t2i_system_prompt="",
+        edit_system_prompt="",
+        t2i_system_prompt_path="",
+        edit_system_prompt_path="",
+        auto_load_system_prompt=True,
         debug=False,
         image=None,
         image1=None,
@@ -886,12 +936,24 @@ class LlamaWorkbenchPromptEnhancer:
                 )
             )
         try:
+            thinking_mode = str(thinking or "on").strip().lower()
             result = rewrite_prompt(
                 backend,
                 str(prompt),
                 task=str(task),
                 system_prompt=str(system_prompt),
                 system_prompt_path=str(system_prompt_path),
+                task_system_prompt=(
+                    str(edit_system_prompt) if str(task).strip().lower() in {"edit", "i2i"} else str(t2i_system_prompt)
+                ),
+                task_system_prompt_path=(
+                    str(edit_system_prompt_path)
+                    if str(task).strip().lower() in {"edit", "i2i"}
+                    else str(t2i_system_prompt_path)
+                ),
+                model_path=str(getattr(backend, "model_path", "") or ""),
+                auto_load_system_prompt=bool(auto_load_system_prompt),
+                enable_thinking=thinking_mode != "off",
                 image_data_urls=image_urls,
                 seed=_safe_int(seed, 42, -1),
                 debug=bool(debug),

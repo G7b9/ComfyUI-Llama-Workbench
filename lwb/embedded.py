@@ -134,7 +134,7 @@ def _create_embedded_backend(
         llm = Llama(**kwargs)
     except Exception as exc:
         raise RuntimeError(f"Embedded llama-cpp-python model load failed: {type(exc).__name__}: {exc}") from exc
-    return EmbeddedBackend(llm=llm, label=f"embedded {family}")
+    return EmbeddedBackend(llm=llm, label=f"embedded {family}", model_path=str(model.resolve()))
 
 
 def create_embedded_backend(**configuration: Any) -> EmbeddedBackend:

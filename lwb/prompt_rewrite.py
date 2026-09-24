@@ -1,11 +1,11 @@
 """Structured Qwen-Image prompt-enhancer support.
 
 The prompt-enhancer checkpoints are ordinary chat models served through the
-same backend socket as the rest of Workbench.  This module contains only the
-task-specific message shape, production sampling profiles, and strict output
-contract.  In particular, it deliberately does not embed either Qwen's system
-prompts or any model assets: callers must supply the matching prompt as text or
-as a local file.
+same backend socket as the rest of Workbench. This module contains the
+task-specific message shape, production sampling profiles, strict output
+contract, and task-aware system-prompt resolution. Official prompt assets are
+still not bundled; callers can provide them explicitly or place them next to
+the matching checkpoint.
 """
 
 from __future__ import annotations
@@ -48,10 +48,22 @@ _RATIO = re.compile(rf"^({_RATIO_COMPONENT}):({_RATIO_COMPONENT})$")
 _IMAGE_REFERENCE = re.compile(r"^<image([1-9]\d*)>$")
 _IMAGE_REFERENCE_CANDIDATE = re.compile(r"<image[^>]*>", re.IGNORECASE)
 _TRUNCATED_FINISH_REASONS = {"length", "limit", "max_tokens", "max_output_tokens"}
+_TASK_SYSTEM_PROMPT_FILENAMES = {
+    "t2i": ("system_prompt_t2i.txt", "system_prompt.txt"),
+    "edit": ("system_prompt_edit.txt", "system_prompt.txt"),
+}
 
 
 class PromptRewriteFormatError(ValueError):
     """The model did not return the declared prompt-enhancer JSON contract."""
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedSystemPrompt:
+    """A validated prompt and a non-sensitive description of its source."""
+
+    text: str
+    source: str
 
 
 def _prompt_rewrite_debug_enabled(explicit: bool = False) -> bool:
@@ -100,7 +112,7 @@ class PromptRewriteProfile:
     presence_penalty: float
     max_tokens: int
 
-    def request_settings(self, seed: int) -> dict[str, Any]:
+    def request_settings(self, seed: int, *, enable_thinking: bool = True) -> dict[str, Any]:
         return {
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
@@ -110,9 +122,9 @@ class PromptRewriteProfile:
             "presence_penalty": self.presence_penalty,
             "seed": int(seed),
             # Both PE checkpoints are trained to reason before emitting the
-            # small JSON answer.  This must not inherit Prompt's generic
-            # thinking default, which is intentionally off.
-            "enable_thinking": True,
+            # small JSON answer. Keep it on by default, while allowing the
+            # node to disable reasoning for faster or lower-token requests.
+            "enable_thinking": bool(enable_thinking),
         }
 
 
@@ -287,41 +299,167 @@ def prompt_rewrite_canvas_spec(
     return PromptRewriteCanvasSpec(width, height, f"ratio_follow:{follow}:aspect_only")
 
 
-def load_system_prompt(system_prompt: str = "", system_prompt_path: str = "") -> str:
-    """Load exactly one user-supplied system prompt source.
+def _normalize_prompt_task(task: str) -> str:
+    normalized = str(task or "").strip().lower()
+    if normalized == "i2i":
+        normalized = "edit"
+    if normalized not in _TASK_SYSTEM_PROMPT_FILENAMES:
+        raise ValueError(f"Unknown prompt-enhancer task {task!r}; choose from: t2i, edit")
+    return normalized
 
-    A directory path is accepted as a convenience and resolves to its
-    ``system_prompt.txt``.  No prompt is downloaded or bundled by Workbench.
+
+def _validate_system_prompt_text(value: str, source: str) -> LoadedSystemPrompt:
+    text = str(value or "").strip().lstrip("\ufeff")
+    if len(text.encode("utf-8")) > MAX_SYSTEM_PROMPT_BYTES:
+        raise ValueError("System Prompt text exceeds the 1 MiB safety limit")
+    if not text:
+        raise ValueError(f"System Prompt is empty: {source}")
+    return LoadedSystemPrompt(text=text, source=source)
+
+
+def _load_system_prompt_file(path: Path, source_label: str = "System Prompt") -> LoadedSystemPrompt:
+    if not path.is_file():
+        raise ValueError(f"{source_label} file does not exist: {path}")
+    if path.stat().st_size > MAX_SYSTEM_PROMPT_BYTES:
+        raise ValueError(f"{source_label} file exceeds the 1 MiB safety limit: {path}")
+    try:
+        loaded = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{source_label} file must be UTF-8 text: {path}") from exc
+    return _validate_system_prompt_text(loaded, str(path))
+
+
+def _prompt_search_directories(model_path: str) -> list[Path]:
+    """Return likely checkpoint directories without guessing remote models."""
+
+    raw = str(model_path or "").strip()
+    if not raw:
+        return []
+    path = Path(raw).expanduser()
+    directories: list[Path] = []
+    if path.is_dir():
+        directories.append(path)
+    elif path.is_file():
+        directories.append(path.parent)
+        sibling_directory = path.parent / path.stem
+        if sibling_directory.is_dir():
+            directories.append(sibling_directory)
+    else:
+        # A cached backend may retain a path after its model has been released.
+        # Do not turn a missing auto-discovery path into an explicit-file error.
+        return []
+
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for directory in directories:
+        resolved = directory.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(resolved)
+    return unique
+
+
+def _load_prompt_from_path(raw_path: str, task: str, *, explicit: bool) -> LoadedSystemPrompt:
+    path = Path(str(raw_path).strip()).expanduser()
+    if path.is_file():
+        return _load_system_prompt_file(path)
+    if not path.is_dir():
+        if explicit:
+            raise ValueError(f"System Prompt path does not exist: {path}")
+        raise FileNotFoundError(path)
+
+    for filename in _TASK_SYSTEM_PROMPT_FILENAMES[task]:
+        candidate = path / filename
+        if candidate.is_file():
+            return _load_system_prompt_file(candidate)
+    if explicit:
+        expected = ", ".join(_TASK_SYSTEM_PROMPT_FILENAMES[task])
+        raise ValueError(f"No {task} System Prompt found in {path}; expected one of: {expected}")
+    raise FileNotFoundError(path)
+
+
+def resolve_system_prompt(
+    task: str = "t2i",
+    *,
+    system_prompt: str = "",
+    system_prompt_path: str = "",
+    task_system_prompt: str = "",
+    task_system_prompt_path: str = "",
+    model_path: str = "",
+    auto_load: bool = True,
+) -> LoadedSystemPrompt:
+    """Resolve one task-matching prompt with explicit overrides first.
+
+    ``system_prompt`` and ``system_prompt_path`` are retained as legacy
+    current-task overrides. The task-specific fields win when present. When
+    auto loading is enabled, a model directory or GGUF sibling directory is
+    searched for the task filename before the generic ``system_prompt.txt``.
     """
 
+    normalized_task = _normalize_prompt_task(task)
+    specific_text = str(task_system_prompt or "").strip()
+    specific_path = str(task_system_prompt_path or "").strip()
+    if specific_text and specific_path:
+        raise ValueError(
+            f"Provide the {normalized_task} System Prompt as text or a local file, not both"
+        )
+    if specific_text:
+        return _validate_system_prompt_text(specific_text, f"inline:{normalized_task}")
+    if specific_path:
+        return _load_prompt_from_path(specific_path, normalized_task, explicit=True)
+
+    # Preserve existing workflows: the generic fields remain valid as an
+    # override for whichever task is selected.
     inline = str(system_prompt or "").strip()
     raw_path = str(system_prompt_path or "").strip()
     if inline and raw_path:
         raise ValueError("Provide the System Prompt as text or a local file, not both")
     if inline:
-        if len(inline.encode("utf-8")) > MAX_SYSTEM_PROMPT_BYTES:
-            raise ValueError("System Prompt text exceeds the 1 MiB safety limit")
-        return inline.lstrip("\ufeff")
-    if not raw_path:
-        raise ValueError(
-            "A matching Qwen PE System Prompt is required. Paste it into system_prompt "
-            "or set system_prompt_path to a local system_prompt.txt file."
-        )
+        return _validate_system_prompt_text(inline, f"inline:{normalized_task}")
+    if raw_path:
+        return _load_prompt_from_path(raw_path, normalized_task, explicit=True)
 
-    path = Path(raw_path).expanduser()
-    if path.is_dir():
-        path = path / "system_prompt.txt"
-    if not path.is_file():
-        raise ValueError(f"System Prompt file does not exist: {path}")
-    if path.stat().st_size > MAX_SYSTEM_PROMPT_BYTES:
-        raise ValueError(f"System Prompt file exceeds the 1 MiB safety limit: {path}")
-    try:
-        loaded = path.read_text(encoding="utf-8").strip().lstrip("\ufeff")
-    except UnicodeDecodeError as exc:
-        raise ValueError(f"System Prompt file must be UTF-8 text: {path}") from exc
-    if not loaded:
-        raise ValueError(f"System Prompt file is empty: {path}")
-    return loaded
+    if auto_load:
+        for directory in _prompt_search_directories(model_path):
+            try:
+                return _load_prompt_from_path(str(directory), normalized_task, explicit=False)
+            except FileNotFoundError:
+                continue
+
+    filenames = ", ".join(_TASK_SYSTEM_PROMPT_FILENAMES[normalized_task])
+    raise ValueError(
+        f"A matching {normalized_task} Qwen PE System Prompt is required. "
+        f"Paste it into {normalized_task}_system_prompt, set its path, or place "
+        f"{filenames} next to the model."
+    )
+
+
+def load_system_prompt(
+    system_prompt: str = "",
+    system_prompt_path: str = "",
+    *,
+    task: str = "t2i",
+    task_system_prompt: str = "",
+    task_system_prompt_path: str = "",
+    model_path: str = "",
+    auto_load: bool = True,
+) -> str:
+    """Return the selected task-matching system prompt text.
+
+    This compatibility wrapper keeps the original two-argument API available
+    to integrations while the node uses :func:`resolve_system_prompt` to also
+    record the selected source for debug output.
+    """
+
+    return resolve_system_prompt(
+        task,
+        system_prompt=system_prompt,
+        system_prompt_path=system_prompt_path,
+        task_system_prompt=task_system_prompt,
+        task_system_prompt_path=task_system_prompt_path,
+        model_path=model_path,
+        auto_load=auto_load,
+    ).text
 
 
 def build_edit_image_reference_rule(image_count: int) -> str:
@@ -550,6 +688,11 @@ def rewrite_prompt(
     task: str = "t2i",
     system_prompt: str = "",
     system_prompt_path: str = "",
+    task_system_prompt: str = "",
+    task_system_prompt_path: str = "",
+    model_path: str = "",
+    auto_load_system_prompt: bool = True,
+    enable_thinking: bool = True,
     image_data_urls: Iterable[str] = (),
     seed: int = 42,
     debug: bool = False,
@@ -557,10 +700,29 @@ def rewrite_prompt(
     """Run a Qwen PE request with one format/truncation retry."""
 
     profile = get_prompt_rewrite_profile(task)
-    prompt_text = load_system_prompt(system_prompt, system_prompt_path)
+    loaded_prompt = resolve_system_prompt(
+        profile.name,
+        system_prompt=system_prompt,
+        system_prompt_path=system_prompt_path,
+        task_system_prompt=task_system_prompt,
+        task_system_prompt_path=task_system_prompt_path,
+        model_path=model_path,
+        auto_load=bool(auto_load_system_prompt),
+    )
+    prompt_text = loaded_prompt.text
+    if _prompt_rewrite_debug_enabled(debug):
+        print(
+            "[Llama Workbench][Prompt Enhancer][debug] "
+            f"task={profile.name} thinking={'on' if enable_thinking else 'off'} "
+            f"system_prompt_source={loaded_prompt.source}",
+            flush=True,
+        )
     images = tuple(image_data_urls)
     base_messages = build_prompt_rewrite_messages(profile, prompt_text, prompt, images)
-    settings = {**profile.request_settings(seed), "accept_truncated_response": True}
+    settings = {
+        **profile.request_settings(seed, enable_thinking=bool(enable_thinking)),
+        "accept_truncated_response": True,
+    }
     messages = list(base_messages)
     all_thinking: list[str] = []
     failures: list[str] = []

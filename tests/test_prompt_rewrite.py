@@ -59,6 +59,7 @@ def test_official_prompt_rewrite_profiles_are_task_specific():
     assert edit.max_tokens == 24000
     assert edit.presence_penalty == 0.0
     assert edit.takes_images is True
+    assert t2i.request_settings(42, enable_thinking=False)["enable_thinking"] is False
 
 
 def test_system_prompt_must_come_from_one_user_or_local_source(tmp_path):
@@ -72,6 +73,35 @@ def test_system_prompt_must_come_from_one_user_or_local_source(tmp_path):
         load_system_prompt("inline", str(prompt_file))
     with pytest.raises(ValueError, match="required"):
         load_system_prompt()
+
+
+def test_task_specific_system_prompt_overrides_legacy_prompt():
+    assert load_system_prompt(
+        task="t2i",
+        system_prompt="legacy",
+        task_system_prompt="official t2i",
+    ) == "official t2i"
+    assert load_system_prompt(
+        task="edit",
+        system_prompt="legacy",
+        task_system_prompt="official edit",
+    ) == "official edit"
+
+
+def test_task_specific_prompt_directory_selects_the_active_task(tmp_path):
+    (tmp_path / "system_prompt_t2i.txt").write_text("t2i prompt\n", encoding="utf-8")
+    (tmp_path / "system_prompt_edit.txt").write_text("edit prompt\n", encoding="utf-8")
+
+    assert load_system_prompt(task="t2i", system_prompt_path=str(tmp_path)) == "t2i prompt"
+    assert load_system_prompt(task="edit", system_prompt_path=str(tmp_path)) == "edit prompt"
+
+
+def test_auto_prompt_discovery_uses_model_sibling_directory(tmp_path):
+    model = tmp_path / "qwen-pe-t2i.gguf"
+    model.write_bytes(b"placeholder")
+    (tmp_path / "system_prompt_t2i.txt").write_text("auto t2i prompt\n", encoding="utf-8")
+
+    assert load_system_prompt(task="t2i", model_path=str(model)) == "auto t2i prompt"
 
 
 def test_edit_messages_keep_images_in_numbered_order_before_text():
@@ -134,6 +164,17 @@ def test_rewrite_prompt_accepts_decimal_ratio_without_retry():
     assert result.wh_ratio == "6:13"
     assert result.retried is False
     assert len(backend.calls) == 1
+
+
+def test_rewrite_prompt_can_disable_thinking():
+    backend = SequenceBackend(
+        ChatResponse(content='{"rewritten_prompt":"direct answer","wh_ratio":"1:1"}')
+    )
+
+    result = rewrite_prompt(backend, "a square icon", system_prompt="user supplied", enable_thinking=False)
+
+    assert result.retried is False
+    assert backend.calls[0][1]["enable_thinking"] is False
 
 
 @pytest.mark.parametrize(
@@ -305,6 +346,14 @@ def test_prompt_enhancer_node_is_registered_and_returns_separate_fields():
 
     assert NODE_CLASS_MAPPINGS["LlamaWorkbench_PromptEnhancer"] is LlamaWorkbenchPromptEnhancer
     assert {"image", *(f"image{index}" for index in range(1, 11))} <= set(node_inputs["optional"])
+    assert {
+        "t2i_system_prompt",
+        "edit_system_prompt",
+        "t2i_system_prompt_path",
+        "edit_system_prompt_path",
+        "auto_load_system_prompt",
+    } <= set(node_inputs["optional"])
+    assert node_inputs["required"]["thinking"][1]["default"] == "on"
     assert node_inputs["optional"]["debug"][1]["default"] is False
     output = LlamaWorkbenchPromptEnhancer().enhance(
         backend,
@@ -321,6 +370,50 @@ def test_prompt_enhancer_node_is_registered_and_returns_separate_fields():
         "wh_ratio": "1:1",
         "ratio_follow": "",
     }
+
+
+def test_prompt_enhancer_can_disable_thinking_at_node_level():
+    backend = SequenceBackend(
+        ChatResponse(content='{"rewritten_prompt":"expanded","wh_ratio":"1:1"}')
+    )
+
+    LlamaWorkbenchPromptEnhancer().enhance(
+        backend,
+        "short",
+        "t2i",
+        "user supplied",
+        "",
+        thinking="off",
+    )
+
+    assert backend.calls[0][1]["enable_thinking"] is False
+
+
+def test_prompt_enhancer_selects_edit_system_prompt_for_edit_task(monkeypatch):
+    backend = SequenceBackend(
+        ChatResponse(
+            content=(
+                '{"rewritten_prompt":"Move the object",'
+                '"wh_ratio":"","ratio_follow":"<image1>"}'
+            )
+        )
+    )
+
+    monkeypatch.setattr(
+        "lwb.nodes.image_tensor_to_data_urls",
+        lambda image, max_images, max_edge, **options: ["data:image/png;base64,one"],
+    )
+    LlamaWorkbenchPromptEnhancer().enhance(
+        backend,
+        "edit it",
+        "edit",
+        "legacy prompt",
+        "",
+        edit_system_prompt="official edit prompt",
+        image1=object(),
+    )
+
+    assert backend.calls[0][0][0]["content"].startswith("official edit prompt")
 
 
 def test_edit_prompt_enhancer_uses_bounded_lossless_image_transport(monkeypatch):
