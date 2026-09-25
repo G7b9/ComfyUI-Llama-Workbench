@@ -11,6 +11,7 @@ from typing import Any
 
 from .backend import EmbeddedBackend, ServerBackend, backend_descriptor, make_text_message
 from .embedded import EMBEDDED_MODELS, create_embedded_backend
+from .image_info import LlamaWorkbenchImageInfo, LlamaWorkbenchImageInfoDisplay
 from .media import image_tensor_to_data_urls
 from .process import OWNED_SERVER, ServerLaunchConfig
 from .prompt_rewrite import (
@@ -1512,6 +1513,8 @@ NODE_CLASS_MAPPINGS = {
     "LlamaWorkbench_Chat": LlamaWorkbenchChat,
     "LlamaWorkbench_ChatDisplay": LlamaWorkbenchChatDisplay,
     "LlamaWorkbench_Seed": LlamaWorkbenchSeed,
+    "LlamaWorkbench_ImageInfo": LlamaWorkbenchImageInfo,
+    "LlamaWorkbench_ImageInfoDisplay": LlamaWorkbenchImageInfoDisplay,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1531,4 +1534,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LlamaWorkbench_Chat": "Llama Workbench Chat",
     "LlamaWorkbench_ChatDisplay": "Llama Workbench Chat Output Display",
     "LlamaWorkbench_Seed": "Llama Workbench Seed",
+    "LlamaWorkbench_ImageInfo": "Llama Workbench Image Info",
+    "LlamaWorkbench_ImageInfoDisplay": "Llama Workbench Image Info Display",
 }

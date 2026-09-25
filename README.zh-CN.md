@@ -73,6 +73,8 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 | Llama Workbench Qwen Image 2.1 Prompt Enhancer | 通过 Workbench backend 原生执行结构化提示词改写。使用官方 T2I/edit 采样 profile，校验 `rewritten_prompt`、`wh_ratio`、`ratio_follow` 及编辑图片引用；节点提供默认开启的 `thinking` 开关。格式错误或生成被截断时，会关闭 thinking 并最多重试一次。任务专用 System Prompt 可粘贴、从文件加载或从本地模型旁自动发现。节点提供 `debug` 复选框，可打印限长原始 answer 和校验错误。 |
 | Llama Workbench Qwen Image 2.1 PE Canvas | 解析 `wh_ratio`、`ratio_follow=<imageN>`、可选手动比例覆盖和 `follow_input_size`，输出宽、高、`ratio_source` 以及原生 `[1,64,H/16,W/16]` Qwen-Image-2.1 `LATENT`。 |
 | Llama Workbench Qwen Image 2.1 PE Resolution | 为已有工作流保留的仅尺寸兼容节点。新的 Qwen-Image-2.1 工作流应使用 PE Canvas，确保 KSampler 收到正确的 64 通道 latent。 |
+| Llama Workbench Image Info | 不复制像素地读取 `IMAGE` 批次，输出宽、高、最长/最短边、总像素、百万像素、宽高比、方向、批次数、通道数及完整张量元数据。 |
+| Llama Workbench Image Info Display | 将完整图片信息格式化为详细、紧凑或 JSON 文本，支持中英文，并在可滚动画布面板中直接显示。 |
 | Llama Workbench Chat | 交互式本地聊天：输入文本后点击节点上的 **发送** 按钮，只会将此 Chat 节点及其上游依赖加入队列，不需要点击 Queue Prompt。节点有实用的初始尺寸，可以自由调整大小，长历史记录会在可滚动的画布区域中显示。`clear_context_before_run` 默认开启，每次排队的工作流都会从新上下文开始；关闭后可继续多轮对话。`use_cache` 默认开启，会独立于 `seed` 重用未变化的完整请求；关闭后可强制新的模型请求。缓存开启时会跳过 `release_comfy_cache_after_run`，以便继续复用响应。`release_owned_server_after_run` 默认开启，Chat 响应后会立即停止自有 llama-server，再让下游 H3/视频节点分配显存。节点包含 **清空上下文** / **清空输入** 操作和文本 token 上下文计量器。Start Server 会自动提供计量器所需的 `context_size`；外部 Connection 需要设置 `context_size` 才能显示百分比。还支持图持久化历史、直接的 `max_tokens` / `seed` / `thinking` / `auto_unload` 控制，以及带 `max_image_edge` 的动态图像 socket（最多 10 张）。 |
 | Llama Workbench Chat Output Display | 仅画布终端查看器，分别预览 Chat 节点的 `thinking` 和 `assistant_message` 输出。 |
 | Llama Workbench Chat Settings | 系统提示词、采样、上下文历史和图像尺寸控制。 |
