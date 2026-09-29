@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from lwb.nodes import NODE_CLASS_MAPPINGS
@@ -77,6 +78,60 @@ def test_examples_use_only_workbench_node_ids():
         text = path.read_text(encoding="utf-8")
         assert "LlamaCpp" not in text
         assert "QwenTE" not in text
+
+
+def test_legacy_pe_widgets_restore_by_name_before_positional_loading():
+    """Execute the frontend migration on the actual pre-thinking examples."""
+    schema = NODE_CLASS_MAPPINGS["LlamaWorkbench_PromptEnhancer"].INPUT_TYPES()
+    declared = {**schema["required"], **schema["optional"]}
+    names = []
+    defaults = {}
+    for name, specification in declared.items():
+        kind = specification[0]
+        options = specification[1] if len(specification) > 1 else {}
+        if kind not in ("STRING", "INT", "FLOAT", "BOOLEAN") and not isinstance(kind, list):
+            continue
+        names.append(name)
+        defaults[name] = options.get("default")
+        if options.get("control_after_generate"):
+            names.append(f"{name}:control_after_generate")
+    assert names[-1] == "image_reference_policy"
+    for path in EXAMPLES.glob("*.json"):
+        for node in json.loads(path.read_text())["nodes"]:
+            if node["type"] != "LlamaWorkbench_PromptEnhancer":
+                continue
+            saved, _ = _serialized_workbench_widgets(node)
+            widgets = [{"name": name.replace("seed:control_after_generate", "control_after_generate"),
+                        "value": defaults.get(name, "fixed")} for name in names]
+            source = (EXAMPLES.parent / "web" / "prompt_enhancer_widgets.js").read_text()
+            script = source + "\nconst [info, widgets] = JSON.parse(process.argv[1]);\n" + (
+                "console.log(JSON.stringify(migratePromptEnhancerWidgets(info, widgets).widgets_values));"
+            )
+            result = subprocess.run(
+                ["node", "--input-type=module", "-e", script, json.dumps([node, widgets])],
+                check=True, capture_output=True, text=True,
+            )
+            restored = dict(zip(names, json.loads(result.stdout), strict=True))
+            assert all(restored[key] == value for key, value in saved.items())
+            assert restored["image_reference_policy"] == "compatible"
+            assert restored["thinking"] == "on"
+            # Current pre-policy exports are positional prefixes. New exports
+            # must also retain an explicitly selected strict policy on reload.
+            for include_policy in (False, True):
+                current_widgets = widgets if include_policy else widgets[:-1]
+                current = {
+                    "inputs": [{"widget": {"name": w["name"]}} for w in current_widgets
+                               if w["name"] != "control_after_generate"],
+                    "widgets_values": ["official_strict" if w["name"] == "image_reference_policy"
+                                       else w["value"] for w in current_widgets],
+                }
+                result = subprocess.run(
+                    ["node", "--input-type=module", "-e", script, json.dumps([current, widgets])],
+                    check=True, capture_output=True, text=True,
+                )
+                values = json.loads(result.stdout)
+                assert values[:-1] == [w["value"] for w in widgets[:-1]]
+                assert values[-1] == ("official_strict" if include_policy else "compatible")
 
 
 def test_workbench_widget_values_are_not_shifted_by_seed_controls():

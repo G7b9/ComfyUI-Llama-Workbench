@@ -16,6 +16,7 @@ from .image_padding import LlamaWorkbenchPadImageToMultiple, LlamaWorkbenchResto
 from .media import image_tensor_to_data_urls
 from .process import OWNED_SERVER, ServerLaunchConfig
 from .prompt_rewrite import (
+    IMAGE_REFERENCE_POLICIES,
     MAX_PROMPT_REWRITE_IMAGES,
     PROMPT_REWRITE_AUTO_ASPECT_RATIO,
     QWEN_IMAGE_21_ASPECT_RATIOS,
@@ -41,7 +42,8 @@ SETTINGS_TYPE = "LLAMA_WORKBENCH_CHAT_SETTINGS"
 SKILL_TYPE = "LLAMA_WORKBENCH_SKILL"
 DYNAMIC_IMAGE_LIMIT = 10
 PE_EDIT_IMAGE_MAX_EDGE = 4096
-PE_EDIT_IMAGE_PIXEL_BUDGET = 1024 * 1024
+PE_EDIT_IMAGE_PIXEL_BUDGET_DEFAULT = 1024 * 1024
+PE_EDIT_IMAGE_PIXEL_BUDGET_MAX = 4 * 1024 * 1024
 _THINKING_BLOCK = re.compile(r"<(?:think|thinking)>\s*(.*?)\s*</(?:think|thinking)>", re.IGNORECASE | re.DOTALL)
 _UNCLOSED_THINKING_BLOCK = re.compile(r"^\s*<(?:think|thinking)>\s*(.*)$", re.IGNORECASE | re.DOTALL)
 _THINKING_HEADING = re.compile(
@@ -816,11 +818,11 @@ class LlamaWorkbenchPromptEnhancer:
                 "max_image_pixels": (
                     "INT",
                     {
-                        "default": PE_EDIT_IMAGE_PIXEL_BUDGET,
+                        "default": PE_EDIT_IMAGE_PIXEL_BUDGET_DEFAULT,
                         "min": 65536,
-                        "max": PE_EDIT_IMAGE_PIXEL_BUDGET,
+                        "max": PE_EDIT_IMAGE_PIXEL_BUDGET_MAX,
                         "step": 65536,
-                        "tooltip": "PE-I2I per-image pixel budget before lossless PNG transport.",
+                        "tooltip": "PE-I2I per-image pixel budget: default 1MP, maximum 4MP. Higher budgets may increase visual tokens, latency, memory use, and context pressure.",
                     },
                 ),
             },
@@ -870,6 +872,14 @@ class LlamaWorkbenchPromptEnhancer:
                         "tooltip": "Print bounded Prompt Enhancer answers and validation errors in the ComfyUI console.",
                     },
                 ),
+                # Append widgets to preserve old positional widgets_values.
+                "image_reference_policy": (
+                    list(IMAGE_REFERENCE_POLICIES),
+                    {
+                        "default": "compatible",
+                        "tooltip": "compatible allows natural references or <image1> for one image; official_strict requires natural references. Both require all tags for multiple images.",
+                    },
+                ),
             },
         }
 
@@ -885,7 +895,7 @@ class LlamaWorkbenchPromptEnhancer:
         max_images=10,
         max_image_edge=PE_EDIT_IMAGE_MAX_EDGE,
         auto_unload=False,
-        max_image_pixels=PE_EDIT_IMAGE_PIXEL_BUDGET,
+        max_image_pixels=PE_EDIT_IMAGE_PIXEL_BUDGET_DEFAULT,
         t2i_system_prompt="",
         edit_system_prompt="",
         t2i_system_prompt_path="",
@@ -903,14 +913,15 @@ class LlamaWorkbenchPromptEnhancer:
         image8=None,
         image9=None,
         image10=None,
+        image_reference_policy: str = "compatible",
     ):
         image_limit = min(MAX_PROMPT_REWRITE_IMAGES, _safe_int(max_images, 10, 1))
         edit_mode = str(task or "").strip().lower() in {"edit", "i2i"}
         requested_edge = _safe_int(max_image_edge, PE_EDIT_IMAGE_MAX_EDGE, 0)
         image_edge = min(requested_edge or PE_EDIT_IMAGE_MAX_EDGE, PE_EDIT_IMAGE_MAX_EDGE)
         image_pixels = min(
-            _safe_int(max_image_pixels, PE_EDIT_IMAGE_PIXEL_BUDGET, 65536),
-            PE_EDIT_IMAGE_PIXEL_BUDGET,
+            _safe_int(max_image_pixels, PE_EDIT_IMAGE_PIXEL_BUDGET_DEFAULT, 65536),
+            PE_EDIT_IMAGE_PIXEL_BUDGET_MAX,
         )
         image_urls: list[str] = []
         for supplied in (
@@ -960,6 +971,7 @@ class LlamaWorkbenchPromptEnhancer:
                 image_data_urls=image_urls,
                 seed=_safe_int(seed, 42, -1),
                 debug=bool(debug),
+                image_reference_policy=image_reference_policy,
             )
         finally:
             _auto_unload_backend(backend, auto_unload)

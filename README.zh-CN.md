@@ -144,7 +144,7 @@ profile 会发送 `temperature=1.0`、`top_p=0.95`、`top_k=20`、`min_p=0`、
 `presence_penalty=1.5`、`max_tokens=16256`；节点 `thinking=on` 时发送
 `enable_thinking=true`，改为 `off` 时关闭推理阶段以降低延迟和 token 用量，但可能降低改写质量。
 解析器只接受单个
-JSON 对象，不接受 Markdown 代码围栏、对象外文本、修复后的 JSON、字段别名或未知字段；
+JSON 对象（允许一个完整的外层 JSON Markdown 代码围栏），不接受对象外文本、修复后的 JSON、字段别名或未知字段；
 `rewritten_prompt`、`wh_ratio` 和规范化为空字符串的 `ratio_follow` 会作为独立 socket
 输出，同时提供 `result_json`。第一次格式错误或服务端截断生成时会触发一次纠正重试；
 重试会关闭 thinking，并只要求最终 JSON。第二次仍失败就停止工作流，不会把不可靠文本
@@ -167,9 +167,25 @@ Qwen-Image-2.1 生成链，在扩散采样前自动卸载 PE 服务，并保存�
 
 `edit` profile 支持有序的 `image1`…`image10` 传输，并使用官方编辑采样差异
 （`presence_penalty=0`、`max_tokens=24000`）。发送给 PE-I2I 的图片优先使用无损 PNG，
-默认限制为 1,048,576 像素和 4096 最大边。节点会在请求时按实际图片数量追加动态规则，
+默认限制为 1,048,576 像素和 4096 最大边。`max_image_pixels` 可配置上限为
+4,194,304 像素（4MP），设为 2,097,152 即使用 2MP。提高预算可能增加视觉 tokens、
+prefill 延迟、RAM/VRAM 占用和上下文压力，不保证提高结果质量。
+节点会在请求时按实际图片数量追加动态规则，
 不会内置官方 System Prompt，并校验返回的 `<image1>`…`<imageN>` 引用。多图输出必须
-引用每张输入图；单图改写提示词中则不能出现图片标签。
+引用每张输入图。新增可选的 `image_reference_policy` 控制单图引用约定：
+
+- `compatible`（默认）：单图允许使用 “the reference image” 等自然语言或显式
+  `<image1>`；保留标签，不自动替换。适合自定义 System Prompt、通用多模态 LLM/VLM、
+  Character Sheet、自定义提示词改写和实验工作流。
+- `official_strict`：保留官方 PE-I2I 约定，单图 rewritten_prompt 必须自然语言引用，
+  正文中出现 `<image1>` 仍会触发校验失败。
+
+两种策略均允许单图 `ratio_follow="<image1>"`，多图均要求引用每张输入图，
+均拒绝格式错误或越界标签。严格 JSON/schema 校验、比例字段互斥、T2I 校验、图片顺序
+和 Canvas 尺寸语义保持不变。动态规则与一次纠正重试同步采用所选策略；debug 输出增加
+policy 和图片数量。新 widget 追加在现有 optional widgets 末尾，旧工作流缺少该字段时
+使用 `compatible`；需要原来的单图风格限制时请选择 `official_strict`。官方 System Prompt
+继续外置。早于 `thinking` 的旧导出会按保存的 widget 名称迁移，避免位置错位。
 
 `06_qwen-image-2.1-pe-edit-2-images-gguf.json` 展示了双图 Edit 完整图。请配置匹配的
 PE-I2I GGUF、BF16 mmproj、外置 System Prompt 和原生 Qwen-Image-2.1 生成模型。示例使用

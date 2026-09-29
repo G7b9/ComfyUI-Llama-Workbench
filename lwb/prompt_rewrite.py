@@ -21,6 +21,7 @@ from typing import Any, Iterable
 
 
 MAX_PROMPT_REWRITE_IMAGES = 10
+IMAGE_REFERENCE_POLICIES = ("compatible", "official_strict")
 MAX_SYSTEM_PROMPT_BYTES = 1024 * 1024
 PROMPT_REWRITE_DEBUG_ENV = "LWB_PROMPT_REWRITE_DEBUG"
 PROMPT_REWRITE_DEBUG_MAX_CHARS = 4000
@@ -50,7 +51,7 @@ _JSON_CODE_FENCE = re.compile(
 _RATIO_COMPONENT = r"(?:0\.\d+|[1-9]\d*(?:\.\d+)?)"
 _RATIO = re.compile(rf"^({_RATIO_COMPONENT}):({_RATIO_COMPONENT})$")
 _IMAGE_REFERENCE = re.compile(r"^<image([1-9]\d*)>$")
-_IMAGE_REFERENCE_CANDIDATE = re.compile(r"<image[^>]*>", re.IGNORECASE)
+_IMAGE_REFERENCE_CANDIDATE = re.compile(r"<image[^<>]*(?:>|(?=<)|$)", re.IGNORECASE)
 _TRUNCATED_FINISH_REASONS = {"length", "limit", "max_tokens", "max_output_tokens"}
 _TASK_SYSTEM_PROMPT_FILENAMES = {
     "t2i": ("system_prompt_t2i.txt", "system_prompt.txt"),
@@ -466,9 +467,22 @@ def load_system_prompt(
     ).text
 
 
-def build_edit_image_reference_rule(image_count: int) -> str:
+def normalize_image_reference_policy(policy: str) -> str:
+    """Validate configuration separately from retryable model-output errors."""
+    normalized = str(policy).strip().lower()
+    if normalized not in IMAGE_REFERENCE_POLICIES:
+        raise ValueError(
+            f"Unknown image_reference_policy {policy!r}; choose from: {', '.join(IMAGE_REFERENCE_POLICIES)}"
+        )
+    return normalized
+
+
+def build_edit_image_reference_rule(
+    image_count: int, image_reference_policy: str = "compatible",
+) -> str:
     """Describe the runtime image numbering without embedding Qwen's prompt."""
 
+    policy = normalize_image_reference_policy(image_reference_policy)
     count = int(image_count)
     if count < 1 or count > MAX_PROMPT_REWRITE_IMAGES:
         raise ValueError(f"edit image count must be between 1 and {MAX_PROMPT_REWRITE_IMAGES}")
@@ -478,10 +492,17 @@ def build_edit_image_reference_rule(image_count: int) -> str:
         f"image part is <image{index}>"
         for index in range(1, count + 1)
     )
-    if count == 1:
+    if count == 1 and policy == "official_strict":
         prompt_rule = (
+            "Refer to the single input image naturally inside rewritten_prompt. "
             "Do not use an image tag inside rewritten_prompt for this single-image request; "
             "<image1> remains valid for ratio_follow."
+        )
+    elif count == 1:
+        prompt_rule = (
+            'Inside rewritten_prompt, either refer naturally to "the input reference image" '
+            "or use the explicit tag <image1>. Both forms are valid. "
+            "<image1> is also valid for ratio_follow."
         )
     else:
         prompt_rule = (
@@ -500,9 +521,11 @@ def build_prompt_rewrite_messages(
     system_prompt: str,
     prompt: str,
     image_data_urls: Iterable[str] = (),
+    image_reference_policy: str = "compatible",
 ) -> list[dict[str, Any]]:
     """Build the PE conversation, keeping edit images before the user text."""
 
+    policy = normalize_image_reference_policy(image_reference_policy)
     user_prompt = str(prompt or "").strip()
     if not user_prompt:
         raise ValueError("prompt must not be empty")
@@ -517,7 +540,7 @@ def build_prompt_rewrite_messages(
     effective_system_prompt = str(system_prompt)
     if profile.takes_images:
         effective_system_prompt = (
-            effective_system_prompt.rstrip() + "\n\n" + build_edit_image_reference_rule(len(images))
+            effective_system_prompt.rstrip() + "\n\n" + build_edit_image_reference_rule(len(images), policy)
         )
 
     if images:
@@ -568,6 +591,7 @@ def parse_prompt_rewrite_json(
     profile: PromptRewriteProfile,
     *,
     image_count: int = 0,
+    image_reference_policy: str = "compatible",
 ) -> dict[str, str]:
     """Strictly parse and validate one PE answer.
 
@@ -577,6 +601,7 @@ def parse_prompt_rewrite_json(
     raw-JSON instruction. Downstream image nodes can trust every field.
     """
 
+    policy = normalize_image_reference_policy(image_reference_policy)
     raw = _unwrap_json_code_fence(str(answer or "").strip())
     if not raw:
         raise PromptRewriteFormatError("assistant answer is empty")
@@ -643,7 +668,9 @@ def parse_prompt_rewrite_json(
         if ratio_follow:
             raise PromptRewriteFormatError("t2i output cannot set ratio_follow")
     else:
-        if image_count == 1 and prompt_references:
+        # Only the single-image writing convention is policy-dependent.
+        # Syntax, bounds, and multi-image coverage remain hard requirements.
+        if policy == "official_strict" and image_count == 1 and prompt_references:
             raise PromptRewriteFormatError(
                 "single-image edit rewritten_prompt must refer to the image naturally, without <image1>"
             )
@@ -713,10 +740,13 @@ def rewrite_prompt(
     image_data_urls: Iterable[str] = (),
     seed: int = 42,
     debug: bool = False,
+    image_reference_policy: str = "compatible",
 ) -> PromptRewriteResult:
     """Run a Qwen PE request with one format/truncation retry."""
 
+    policy = normalize_image_reference_policy(image_reference_policy)
     profile = get_prompt_rewrite_profile(task)
+    images = tuple(image_data_urls)
     loaded_prompt = resolve_system_prompt(
         profile.name,
         system_prompt=system_prompt,
@@ -731,11 +761,11 @@ def rewrite_prompt(
         print(
             "[Llama Workbench][Prompt Enhancer][debug] "
             f"task={profile.name} thinking={'on' if enable_thinking else 'off'} "
+            f"image_reference_policy={policy} image_count={len(images)} "
             f"system_prompt_source={loaded_prompt.source}",
             flush=True,
         )
-    images = tuple(image_data_urls)
-    base_messages = build_prompt_rewrite_messages(profile, prompt_text, prompt, images)
+    base_messages = build_prompt_rewrite_messages(profile, prompt_text, prompt, images, policy)
     settings = {
         **profile.request_settings(seed, enable_thinking=bool(enable_thinking)),
         "accept_truncated_response": True,
@@ -766,7 +796,9 @@ def rewrite_prompt(
             )
         else:
             try:
-                parsed = parse_prompt_rewrite_json(answer, profile, image_count=len(images))
+                parsed = parse_prompt_rewrite_json(
+                    answer, profile, image_count=len(images), image_reference_policy=policy,
+                )
             except PromptRewriteFormatError as exc:
                 failure = exc
         if failure is not None:
@@ -786,8 +818,8 @@ def rewrite_prompt(
                 expected = (
                     'Use exactly the string fields "rewritten_prompt", "wh_ratio", and "ratio_follow". '
                     'Exactly one of "wh_ratio" and "ratio_follow" must be non-empty; a non-empty '
-                    'ratio_follow must use one of the runtime image tags. Obey the Runtime Image Mapping '
-                    'rule for references inside rewritten_prompt.'
+                    'ratio_follow must use one of the runtime image tags. '
+                    + build_edit_image_reference_rule(len(images), policy)
                 )
             else:
                 expected = (

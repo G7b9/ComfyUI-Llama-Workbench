@@ -122,7 +122,7 @@ def test_edit_messages_keep_images_in_numbered_order_before_text():
 
 
 def test_dynamic_edit_image_rule_distinguishes_single_and_multi_image_contracts():
-    assert "Do not use an image tag inside rewritten_prompt" in build_edit_image_reference_rule(1)
+    assert "Do not use an image tag inside rewritten_prompt" in build_edit_image_reference_rule(1, "official_strict")
     rule = build_edit_image_reference_rule(3)
     assert "<image1>, <image2>, <image3>" in rule
     assert "reference every input image at least once" in rule
@@ -258,6 +258,7 @@ def test_edit_parser_validates_rewritten_prompt_image_references():
             '{"rewritten_prompt":"Edit <image1>","wh_ratio":"","ratio_follow":"<image1>"}',
             profile,
             image_count=1,
+            image_reference_policy="official_strict",
         )
 
 
@@ -472,8 +473,8 @@ def test_edit_prompt_enhancer_uses_bounded_lossless_image_transport(monkeypatch)
 
     assert output["result"][2] == "<image2>"
     assert calls == [
-        (first, 5, 4096, {"max_pixels": 1048576, "image_format": "png"}),
-        (second, 4, 4096, {"max_pixels": 1048576, "image_format": "png"}),
+        (first, 5, 4096, {"max_pixels": 4194304, "image_format": "png"}),
+        (second, 4, 4096, {"max_pixels": 4194304, "image_format": "png"}),
     ]
 
 

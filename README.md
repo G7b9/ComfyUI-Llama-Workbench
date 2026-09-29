@@ -162,7 +162,7 @@ values into a generic Prompt node. Its `t2i` profile sends `temperature=1.0`,
 `max_tokens=16256`, and `enable_thinking=true` when the node's `thinking` is `on`.
 Set `thinking` to `off` to request the final JSON without the reasoning pass, which
 reduces latency and token use but may reduce rewrite quality. It parses exactly one JSON
-object—no Markdown fences, prose, repaired JSON, aliases, or unknown fields—and
+object (one complete outer JSON Markdown fence is tolerated)—no prose, repaired JSON, aliases, or unknown fields—and
 exposes `rewritten_prompt`, `wh_ratio`, and the normalized empty
 `ratio_follow` as separate sockets plus `result_json`. A formatting failure or
 a generation truncated by the server gets one corrective retry. That retry
@@ -192,11 +192,30 @@ auto-unloads the PE server before diffusion sampling, and saves the image.
 The `edit` profile supports ordered `image1`…`image10` transport and uses the
 official edit sampling differences (`presence_penalty=0`,
 `max_tokens=24000`). Images sent to PE-I2I are lossless PNGs constrained by
-default to 1,048,576 pixels and a 4096-pixel maximum edge. At request time the
+default to 1,048,576 pixels and a 4096-pixel maximum edge. `max_image_pixels`
+has a configurable maximum of 4,194,304 pixels (4MP); 2,097,152 selects 2MP.
+Higher budgets may increase visual tokens, prefill latency, RAM/VRAM usage,
+and context pressure; they do not guarantee better results. At request time the
 node adds a dynamic rule for the exact image count, without embedding the
 official System Prompt, and validates the returned `<image1>`…`<imageN>`
-references. Multi-image output must reference every input image, while a
-single-image rewritten prompt must not include an image tag.
+references. The optional `image_reference_policy` selects the edit convention:
+
+- `compatible` (default): a single-image rewrite may use natural language such
+  as "the reference image" or the explicit `<image1>` tag. Tags are preserved,
+  not replaced. Suitable for custom System Prompts, generic multimodal LLM/VLMs,
+  Character Sheet, custom prompt rewriting, and experimental workflows.
+- `official_strict`: retains the official PE-I2I convention: a single-image
+  rewrite must refer naturally to the image, without `<image1>` in its text.
+
+Both policies allow single-image `ratio_follow="<image1>"`, require every
+input tag for multiple images, and reject malformed or out-of-range tags.
+Strict JSON/schema checks, exclusive `wh_ratio`/`ratio_follow`, T2I validation,
+image ordering, and Canvas sizing are unchanged. Runtime mapping and the one
+corrective retry use the selected policy. Debug output includes the policy and
+image count. The widget is appended after existing optional widgets; old workflows
+without it use `compatible`. Select `official_strict` to retain the previous
+single-image style rejection. Older exports that predate `thinking` are restored
+by their saved widget names to avoid positional shifts. Official System Prompts remain external.
 
 `06_qwen-image-2.1-pe-edit-2-images-gguf.json` demonstrates the two-image edit
 graph. Configure a matching PE-I2I GGUF, BF16 mmproj, external System Prompt,

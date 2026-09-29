@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { migratePromptEnhancerWidgets } from "./prompt_enhancer_widgets.js";
 
 const PROMPT_NODE = "LlamaWorkbench_Prompt";
 const PROMPT_ENHANCER_NODE = "LlamaWorkbench_PromptEnhancer";
@@ -91,6 +92,12 @@ app.registerExtension({
     name: "LlamaWorkbench.DynamicImages",
     beforeRegisterNodeDef(nodeType, nodeData) {
         if (!DYNAMIC_IMAGE_NODES.has(nodeData.name)) return;
+        if (nodeData.name === PROMPT_ENHANCER_NODE) {
+            const configure = nodeType.prototype.configure;
+            nodeType.prototype.configure = function (info) {
+                return configure.call(this, migratePromptEnhancerWidgets(info, this.widgets || []));
+            };
+        }
 
         const created = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
