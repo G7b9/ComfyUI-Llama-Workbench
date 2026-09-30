@@ -2,17 +2,14 @@
 
 [English](README.md) | 中文
 
-一个用于本地 llama.cpp 工作流的独立 ComfyUI 自定义节点包。本项目可以与
-`comfyui-llamacpp` 和 `comfyUI-llama-TE` 共存，使用独立的节点 ID
-(`LlamaWorkbench_*`)、socket 类型 (`LLAMA_WORKBENCH_*`)、前端扩展名
-(`LlamaWorkbench.SafeChat`)、环境变量 `LWB_LLAMA_SERVER_BINARY` 以及自有的
-进程注册表。
+用于本地文本生成、多模态提示词、交互聊天和可复用提示词 Skill 的 ComfyUI 自定义节点包。
+支持连接已有的 OpenAI 兼容服务器、启动本地 `llama-server`，或使用可选的
+`llama-cpp-python` 嵌入式后端。
 
-它整合了以下功能，同时不会导入或替换其他节点包：
+主要功能：
 
 - 启动和停止一个由本包明确拥有的外部 `llama-server` 进程，支持指定二进制路径和
-  shell 安全的自定义参数。只要兼容分支保留 `llama-server` 风格的 HTTP 聊天端点，
-  TurboQuant 等分支也可以使用。
+  shell 安全的自定义参数，具体参数由所选可执行文件支持。
 - 连接另一个本地 OpenAI 兼容的 `llama-server`，不会假定拥有该进程的生命周期。
 - 通过任一后端生成文本或图像反推提示词结果。
 - 通过同一个后端运行 Qwen-Image-2.1 Prompt Enhancer，使用官方任务采样 profile，并
@@ -20,6 +17,7 @@
   PE-I2I 图片引用。
 - 可选地通过 `llama-cpp-python` 加载 Qwen/Gemma 风格的本地模型，包括常见的多模态
   聊天处理器、KV q8_0 缓存选项，以及在已安装绑定支持时使用 Qwen MoE CPU 选项。
+- 通过带鉴权的 API 将文本请求与图片工作流共同排队，支持持久请求 ID、结构化结果和显存调度。
 - 使用原生 ComfyUI 消息字段保存图结构中的聊天历史。
 - 从本包自己的 `skills/` 目录加载纯数据 Skill。Skill 可以请求已声明的参考资料、
   提供阶段和选项，但不是工具，不能执行 shell、网络或 ComfyUI 操作。
@@ -49,10 +47,11 @@ python -m pip install "llama-cpp-python>=0.3.37"
 
 重启 ComfyUI 后，节点会出现在 **Llama Workbench** 分类下。
 
-`wait_seconds` 是启动就绪等待上限，不是模型生成上限。首次加载大型模型，尤其是带
+**Llama Workbench Start Server** 的 `wait_seconds` 是启动就绪等待上限，不是模型生成上限。首次加载大型模型，尤其是带
 mmproj 的 Qwen/Gemma VLM 时，建议使用 600–1800 秒。如果等待超时，Workbench 会终止
 它所拥有的 llama-server，避免 GPU 显存、内存和端口阻塞后续工作流。调整等待时间后再
-重试即可。
+重试即可。队列 API 使用独立的超时策略，未知启动结果会保留 GPU 租约，详见
+[队列 API 文档](docs/queue-api.md)。
 
 对于 **Llama Workbench Start Server**，`timeout_seconds` 是服务器就绪后每次 Chat 或
 Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Connection** 相同。长
@@ -65,8 +64,8 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 | Llama Workbench Start Server | 使用指定的 llama-server 兼容可执行文件启动一个模型。服务器启动前，`release_comfy_models` 会释放 ComfyUI 管理的 GPU 模型；`cleanup_previous_server` 仅保留输入兼容，不再按可执行文件或端口清理外部进程。 |
 | Llama Workbench Connection | 连接已有的 HTTP 服务器，不接管其生命周期。 |
 | Llama Workbench Stop Owned Server | 只停止由本包启动的进程。 |
-| Llama Workbench Server Status | 显示进程身份、命令和有限长度的日志尾部。 |
-| Llama Workbench H3 Auto Resolution Selector | 将输入图像匹配到最接近的 MiniMax H3 支持比例，并根据目标百万像素计算兼容的宽高。 |
+| Llama Workbench Server Status | 显示进程身份、租约状态和有限长度的启动日志。 |
+| Llama Workbench H3 Auto Resolution Selector | 将输入图像匹配到最接近的支持比例，并根据目标百万像素计算宽高。 |
 | Llama Workbench Embedded VL Model | 可选的 `llama-cpp-python` 直接加载器，适用于 Qwen/Gemma 风格模型。 |
 | Llama Workbench Release Embedded Model | 显式关闭嵌入式模型。 |
 | Llama Workbench Prompt / Image2Prompt | 通过统一后端 socket 进行文本提示或图像反推提示词。图像 socket 会随着连接从 `image` 变为 `image1`、`image2` 等，最多 10 个；还提供 `seed`、`max_images`、`max_image_edge`、`auto_unload` 以及默认关闭的 `thinking` 控制。 |
@@ -77,7 +76,7 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 | Llama Workbench Image Info Display | 将完整图片信息格式化为详细、紧凑或 JSON 文本，支持中英文，并在可滚动画布面板中直接显示。 |
 | Llama Workbench Pad Image to Multiple | 使用原生颜色选择器、可选 Alpha 和九宫格位置，把图片宽高补到指定倍数，并输出可精确还原的 padding 元数据。 |
 | Llama Workbench Restore Image from Padding | 使用 padding 元数据，将处理后的补边图片裁剪回原始内容区域和尺寸。 |
-| Llama Workbench Chat | 交互式本地聊天：输入文本后点击节点上的 **发送** 按钮，只会将此 Chat 节点及其上游依赖加入队列，不需要点击 Queue Prompt。节点有实用的初始尺寸，可以自由调整大小，长历史记录会在可滚动的画布区域中显示。`clear_context_before_run` 默认开启，每次排队的工作流都会从新上下文开始；关闭后可继续多轮对话。`use_cache` 默认开启，会独立于 `seed` 重用未变化的完整请求；关闭后可强制新的模型请求。缓存开启时会跳过 `release_comfy_cache_after_run`，以便继续复用响应。`release_owned_server_after_run` 默认开启，Chat 响应后会立即停止自有 llama-server，再让下游 H3/视频节点分配显存。节点包含 **清空上下文** / **清空输入** 操作和文本 token 上下文计量器。Start Server 会自动提供计量器所需的 `context_size`；外部 Connection 需要设置 `context_size` 才能显示百分比。还支持图持久化历史、直接的 `max_tokens` / `seed` / `thinking` / `auto_unload` 控制，以及带 `max_image_edge` 的动态图像 socket（最多 10 张）。 |
+| Llama Workbench Chat | 交互式本地聊天：输入文本后点击节点上的 **发送** 按钮，只会将此 Chat 节点及其上游依赖加入队列，不需要点击 Queue Prompt。节点有实用的初始尺寸，可以自由调整大小，长历史记录会在可滚动的画布区域中显示。`clear_context_before_run` 默认开启，每次排队的工作流都会从新上下文开始；关闭后可继续多轮对话。`use_cache` 默认开启，会独立于 `seed` 重用未变化的完整请求；关闭后可强制新的模型请求。缓存开启时会跳过 `release_comfy_cache_after_run`，以便继续复用响应。`release_owned_server_after_run` 默认开启，Chat 响应后会立即停止自有 llama-server，再让下游图片或视频节点分配显存。节点包含 **清空上下文** / **清空输入** 操作和文本 token 上下文计量器。Start Server 会自动提供计量器所需的 `context_size`；外部 Connection 需要设置 `context_size` 才能显示百分比。还支持图持久化历史、直接的 `max_tokens` / `seed` / `thinking` / `auto_unload` 控制，以及带 `max_image_edge` 的动态图像 socket（最多 10 张）。 |
 | Llama Workbench Chat Output Display | 仅画布终端查看器，分别预览 Chat 节点的 `thinking` 和 `assistant_message` 输出。 |
 | Llama Workbench Chat Settings | 系统提示词、采样、上下文历史和图像尺寸控制。 |
 | Llama Workbench Skill Loader | 加载一个包内 Skill、自动选择 Skill，或进行普通聊天。 |
@@ -114,8 +113,7 @@ Server** 启动的精确 `llama-server` 进程，或释放 Workbench 的嵌入�
 `image2`；每增加一个连接，就会暴露下一个 socket，最多 10 张图像。`max_images` 是所有
 已连接 socket 和 `IMAGE` batch 的合计上限。
 
-Chat 不规定 H3 专用的图像 socket 角色。连接图像的具体解释由选中的 Skill 和用户请求
-决定。
+连接图像的具体解释由选中的 Skill 和用户请求决定。
 
 ## Qwen-Image-2.1 Prompt Enhancer
 
@@ -199,12 +197,12 @@ TextEncode 的 positive/negative 进入 KSampler，PE Canvas 的 latent 进入 K
 49152 context 与 server 参数，并由解析器强制改写提示词引用全部 10 个标签。该示例有意
 停在 Prompt Enhancer；完整扩散出图请使用 06。
 
-## H3 兼容的自动分辨率
+## 图像自动分辨率
 
 **Llama Workbench H3 Auto Resolution Selector** 接受一个 `IMAGE`、目标 `megapixels`
 值和取整 `multiple`（默认 8）。在默认的 `Auto (nearest input image)` 模式下，它会从
-MiniMax H3 Resolution Selector 的比例中选择最接近输入图像的一个：1:1、2:3、3:2、3:4、
-4:3、9:16、16:9 或 21:9。随后使用相同的目标像素计算和最近倍数取整方式输出 `width`
+支持的比例中选择最接近输入图像的一个：1:1、2:3、3:2、3:4、
+4:3、9:16、16:9 或 21:9。随后根据目标像素数计算尺寸，并按指定倍数取整，输出 `width`
 和 `height`，可连接到 `Empty Latent Image` 等节点。也可以手动选择列表中的比例覆盖
 自动选择；图像输入仍可作为工作流中的视觉参考。
 
@@ -215,9 +213,9 @@ Chat 会将思考轨迹放到 `thinking` 输出，只将最终答案放到 `assi
 恰好重试一次，以恢复最终答案；原始思考内容仍保留在 `thinking` 输出中。Chat Settings
 会在每次排队时重新构建，因此清空系统提示词会在下一次运行生效。
 
-## 自定义服务器命令和 TurboQuant 风格构建
+## 服务器配置与显存管理
 
-如果在同一块 GPU 上交替运行 MiniMax H3 和 llama.cpp，请保持 Start Server 的
+如果文本推理和图像生成共用一块 GPU，请保持 Start Server 的
 `release_comfy_models` 开启（默认值）。启动 llama-server 前，它会调用 ComfyUI 的受管
 模型卸载和 CUDA 缓存释放，效果相当于 **Free Model and Node Cache** 中的模型内存部分。
 对于 35B 模型，建议将 `wait_seconds` 设置为至少 `600`；旧工作流可能仍保存着之前的
@@ -239,44 +237,47 @@ Skill 层会将包内的 `SKILL.md` 文件视为提示词指令。它可以自�
 状态中携带阶段和选项，并重新加载一轮已声明的参考资料。Skill **不会**赋予模型任意
 工具权限。在 ComfyUI 图中，提示词 Skill 只能生成计划或提示词，实际生成由工作流完成。
 
-添加 Skill 时可以创建：
+将每个自定义 Skill 放到下面目录的独立子文件夹中：
 
 ```text
-skills/my-skill/SKILL.md
-skills/my-skill/references/optional-guide.md
-skills/my-skill/runtime.json   # 可选的声明式路由和校验
+ComfyUI/custom_nodes/ComfyUI-Llama-Workbench/skills/
+└── my-skill/
+    ├── SKILL.md
+    ├── references/
+    │   └── optional-guide.md
+    └── runtime.json
 ```
 
-使用简单的 YAML frontmatter 设置 `name` 和 `description`。参考资料仅限于该 Skill 目录
-内的 `.md`、`.txt`、`.json`、`.yaml` 和 `.yml` 文件。
+只有 `SKILL.md` 是必需文件。文件夹名以字母或数字开头，可使用字母、数字、连字符、下划线和点，例如
+`my-skill`。在 `SKILL.md` 中填写名称、描述和提示词指令：
+
+```markdown
+---
+name: 文本润色
+description: 在保留原意的基础上，让文字更清晰、简洁。
+---
+润色用户提供的文字，保留原意，只输出修改后的正文。
+```
+
+参考文件放入 `references/`，支持 `.md`、`.txt`、`.json`、`.yaml` 和 `.yml`。
+添加后刷新 ComfyUI 页面以重新获取节点定义，在 **Llama Workbench Skill Loader** 中
+选择文件夹名，并将 `skill` 输出连接到 **Llama Workbench Chat**。
+选择 `Auto` 可自动选择 Skill，选择 `None` 则进行普通聊天。
+导入已有 Skill 时，将包含 `SKILL.md` 和参考文件的完整文件夹复制到同一个 `skills/` 目录即可。
 
 `runtime.json` 是可选的纯数据声明。Skill 可以在用户消息中声明普通的 `Field: value`
 选择器，将路由值映射到自身已声明的参考文件，并向模型提供输出格式指导。Chat 会在推理
 前预加载选中的参考资料，但始终接受模型的最终文本；不会根据标题、时间戳、标签或其他
-推断格式校验、改写、重试或拒绝响应。核心节点没有 H3 专用分支；没有 runtime 文件的
-Skill 会保留模型请求参考资料的原始流程。
+推断格式校验、改写、重试或拒绝响应。没有 `runtime.json` 的 Skill 使用模型请求加载参考资料的流程。
 
-本仓库不内置 MiniMax H3 prompt-writing Skill 或其参考指南。如果你使用的环境支持
-Agent Skills，请按照上游说明安装官方 Skill：
+## 进程生命周期
 
-```text
-npx skills add https://github.com/MiniMax-AI/MiniMax-H3 --skill h3-prompt-writing
-```
+Workbench 跟踪自己创建的确切子进程，停止操作要求租约匹配且进程空闲。
+通过 Connection 连接的服务由其外部管理者负责。嵌入式模型可以通过
+**Llama Workbench Release Embedded Model** 显式释放。
 
-可在[官方 MiniMax H3 Skill](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/.agents/skills/h3-prompt-writing)
-中查看提示词示例和参考指南。上述命令会将 Skill 安装到本仓库之外；Llama Workbench
-Skill Loader 只会发现本包自己的 `skills/` 目录中的 Skill。
-
-本包也不包含 MiniMax H3 模型权重；使用这些模型时仍需遵守上游模型许可证。
-
-## 共存和生命周期保证
-
-本包不会 monkey-patch `comfy.model_management`、注册共享的 `LLM` 模型目录、使用其他
-包的节点 ID，也不会按进程名杀进程。停止节点只会定位并停止它自己通过
-`subprocess.Popen` 创建的进程。
-
-外部连接永远不会被本包停止。嵌入式模型的清理是显式执行的，不会拦截 ComfyUI 的全局
-卸载操作。
+队列 API 将完整文本请求与 ComfyUI 原生图片执行统一调度。调度、空闲释放、取消、鉴权和
+未知结果恢复规则见 [队列 API 文档](docs/queue-api.md)。
 
 ## 开发
 
@@ -290,10 +291,11 @@ Skill 状态解析。测试不需要 ComfyUI、模型或 GPU。
 
 ## 许可证
 
-MIT。本项目为独立实现，不包含从相邻两个自定义节点目录复制的源代码或捆绑资源。
+[MIT](LICENSE)。
 
-## 导演工作台统一调度
+## 队列 API 接入
 
-新增与原生图片队列互斥的文本 API，支持持久 request_id、结构化响应、目标取消与未知结果隔离。
-详见 [API 文档](docs/director-api.md) 和可导入的 [Postman 集合](examples/api/director.postman_collection.json)。
-导演台须将直接 llama.cpp 推理迁移到此 API，才能覆盖完整推理周期的 GPU 租约。
+桌面应用、批处理脚本、Web 服务和其他工作流工具均可通过队列 API 接入 ComfyUI，
+让文本与图片任务共享显存调度，并获取持久请求 ID、结构化结果和定向取消能力。
+详见 [API 文档](docs/queue-api.md) 和可导入的 [Postman 集合](examples/api/queue-api.postman_collection.json)。
+文本推理需要通过此 API 提交，才能参与完整推理周期的 GPU 租约。

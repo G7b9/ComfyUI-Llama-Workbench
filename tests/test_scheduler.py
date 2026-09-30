@@ -679,3 +679,111 @@ def test_cancel_during_start_skips_generation(scheduler):
     assert result["cancellation"] == "before_inference"
     assert scheduler.server.active == 0
     assert "response" not in result
+
+
+MTP_ARGS = (
+    "--cache-type-k turbo4 --cache-type-v turbo3 --flash-attn on "
+    "--spec-type draft-mtp --spec-draft-n-max 4 "
+    "--spec-draft-type-k turbo4 --spec-draft-type-v turbo3 --fit off"
+)
+
+
+def write_managed_profile(tmp_path, monkeypatch, **overrides):
+    path = tmp_path / "profiles.json"
+    value = dict(
+        binary_path="custom-llama",
+        model_path="model.gguf",
+        context_size=163840,
+        gpu_layers=65,
+        mmproj_path="",
+        extra_args=MTP_ARGS,
+    )
+    value.update(overrides)
+    path.write_text(json.dumps({"director": value}))
+    monkeypatch.setenv("LWB_PROFILES_FILE", str(path))
+    return load_profiles()["director"]
+
+
+def test_verified_mtp_profile_preserves_every_argument(tmp_path, monkeypatch, scheduler):
+    profile = write_managed_profile(tmp_path, monkeypatch, startup_timeout_seconds=900)
+    scheduler.profiles["director"] = profile
+    calls = []
+    original = scheduler.server.start
+
+    def start(config, **kwargs):
+        calls.append((config, kwargs))
+        return original(config, **kwargs)
+
+    scheduler.server.start = start
+    scheduler.submit("a", "director", PAYLOAD, "mtp")
+    assert scheduler.run("mtp")["state"] == "completed"
+    config, kwargs = calls[0]
+    assert config.context_size == 163840 and config.gpu_layers == 65
+    assert config.mmproj_path == ""
+    assert config.extra_args == MTP_ARGS + " --no-context-shift --parallel 1"
+    assert kwargs["wait_seconds"] == 900
+    assert kwargs["retain_on_timeout"] and kwargs["validate_custom_options"]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        "--spec-type",
+        "--spec-type draft",
+        "--spec-draft-n-max",
+        "--spec-draft-n-max 0",
+        "--spec-draft-n-max 65",
+        "--spec-draft-n-max 4.5",
+        "--spec-draft-n-max -1",
+        "--spec-draft-type-k turbo5",
+        "--spec-draft-type-v invalid",
+        "--spec-draft-type-v",
+        "--fit",
+        "--fit maybe",
+        "--fit off extra",
+        "--fit off --fit on",
+        "--parallel 1",
+        "--spec-type draft-mtp --port 9000",
+    ],
+)
+def test_mtp_profile_rejects_wrong_arity_values_and_lifecycle_overrides(
+    tmp_path, monkeypatch, arguments
+):
+    with pytest.raises(ValueError):
+        write_managed_profile(tmp_path, monkeypatch, extra_args=arguments)
+
+
+@pytest.mark.parametrize("timeout", [0, 1801, -10, True, "900", float("nan"), float("inf")])
+def test_profile_timeout_is_bounded_numeric_admin_policy(tmp_path, monkeypatch, timeout):
+    with pytest.raises(ValueError, match="startup_timeout_seconds"):
+        write_managed_profile(tmp_path, monkeypatch, startup_timeout_seconds=timeout)
+
+
+def test_old_profile_defaults_to_600_seconds(tmp_path, monkeypatch):
+    assert write_managed_profile(tmp_path, monkeypatch).startup_timeout_seconds == 600
+
+
+def test_startup_timeout_retains_lease_and_never_retries(scheduler):
+    from lwb.process import ServerStartupTimeout
+
+    calls = []
+
+    def start(config, **kwargs):
+        calls.append(config)
+        raise ServerStartupTimeout("Still loading the model")
+
+    scheduler.server.start = start
+    scheduler.submit("a", "text", PAYLOAD, "slow")
+    result = scheduler.run("slow")
+    assert result["state"] == "result_unknown"
+    assert result["error"]["kind"] == "startup_timeout"
+    assert result["error"]["lease_retained"]
+    assert scheduler.blocked and scheduler.journal.meta("lease")
+    scheduler.last_used = 0
+    scheduler.idle_release()
+    assert scheduler.server.stops == 0
+    assert scheduler.cancel("a", "slow")["state"] == "result_unknown"
+    assert scheduler.submit("a", "text", PAYLOAD, "slow")["state"] == "result_unknown"
+    with pytest.raises(RuntimeError, match="quarantined"):
+        scheduler.before_graph({"1": {"class_type": "KSampler"}})
+    assert len(calls) == 1

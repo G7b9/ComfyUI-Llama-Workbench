@@ -6,12 +6,12 @@
   "variable": [
     {"key": "base_url", "value": "http://127.0.0.1:8188"},
     {"key": "token", "value": "replace-with-LWB_API_TOKEN"},
-    {"key": "request_id", "value": "director-scene-001-v1"}
+    {"key": "request_id", "value": "request-001-v1"}
   ],
   "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{token}}", "type": "string"}]},
   "item": [
     {"name": "Capabilities and quarantine", "request": {"method": "GET", "url": "{{base_url}}/lwb/v1/status"}},
-    {"name": "Submit idempotent structured request", "request": {"method": "POST", "url": "{{base_url}}/lwb/v1/requests", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"profile\": \"director-text\",\n  \"payload\": {\n    \"messages\": [{\"role\": \"user\", \"content\": \"Return a JSON object describing a forest.\"}],\n    \"temperature\": 0.2,\n    \"max_tokens\": 512,\n    \"chat_template_kwargs\": {\"enable_thinking\": false},\n    \"response_format\": {\"type\": \"json_object\"}\n  }\n}"}}},
+    {"name": "Submit idempotent structured request", "request": {"method": "POST", "url": "{{base_url}}/lwb/v1/requests", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\n  \"request_id\": \"{{request_id}}\",\n  \"profile\": \"local-text\",\n  \"payload\": {\n    \"messages\": [{\"role\": \"user\", \"content\": \"Return a JSON object describing a forest.\"}],\n    \"temperature\": 0.2,\n    \"max_tokens\": 512,\n    \"chat_template_kwargs\": {\"enable_thinking\": false},\n    \"response_format\": {\"type\": \"json_object\"}\n  }\n}"}}},
     {"name": "Get status and original result", "request": {"method": "GET", "url": "{{base_url}}/lwb/v1/requests/{{request_id}}"}},
     {"name": "Cancel only this request", "request": {"method": "POST", "url": "{{base_url}}/lwb/v1/requests/{{request_id}}/cancel"}},
     {"name": "Reconcile proven process exit", "request": {"method": "POST", "url": "{{base_url}}/lwb/v1/reconcile"}}

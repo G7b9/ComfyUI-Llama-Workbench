@@ -1,0 +1,13 @@
+{
+  "local-text-mtp": {
+    "binary_path": "/opt/llama-custom/bin/llama-server",
+    "model_path": "/models/text-model.gguf",
+    "host": "127.0.0.1",
+    "port": 8080,
+    "context_size": 163840,
+    "gpu_layers": 65,
+    "mmproj_path": "",
+    "startup_timeout_seconds": 900,
+    "extra_args": "--cache-type-k turbo4 --cache-type-v turbo3 --flash-attn on --spec-type draft-mtp --spec-draft-n-max 4 --spec-draft-type-k turbo4 --spec-draft-type-v turbo3 --fit off"
+  }
+}

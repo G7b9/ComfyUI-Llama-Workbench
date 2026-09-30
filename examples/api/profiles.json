@@ -1,5 +1,5 @@
 {
-  "director-text": {
+  "local-text": {
     "binary_path": "/opt/llama.cpp/bin/llama-server",
     "model_path": "/models/text-model.gguf",
     "host": "127.0.0.1",

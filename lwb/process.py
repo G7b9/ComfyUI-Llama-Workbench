@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -20,6 +21,10 @@ from .backend import ServerBackend, normalize_server_url
 
 class ServerLaunchError(RuntimeError):
     """The configured local llama-server could not be started."""
+
+
+class ServerStartupTimeout(ServerLaunchError):
+    """Readiness deadline expired; the child may still be loading the model."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +181,34 @@ class OwnedServer:
             raise ServerLaunchError("The configured binary did not respond to --version")
 
     @staticmethod
+    def _check_custom_options(binary: str, extra_args: str) -> None:
+        """Reject incompatible builds before loading weights; never drop flags."""
+        args = _parse_extra_args(extra_args)
+        required = set(args) & {
+            "--spec-type", "--spec-draft-n-max", "--spec-draft-type-k",
+            "--spec-draft-type-v", "--fit",
+        }
+        if not required:
+            return
+        try:
+            result = subprocess.run(
+                [binary, "--help"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, timeout=10, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ServerLaunchError("Cannot verify custom build options with --help") from exc
+        advertised = set(re.findall(r"--[a-zA-Z0-9][a-zA-Z0-9-]*", result.stdout or ""))
+        missing = required - advertised
+        if result.returncode != 0 or missing:
+            raise ServerLaunchError(
+                "Configured binary does not advertise required custom options: "
+                + ", ".join(sorted(missing or required))
+                + ". Use the verified custom build; no arguments or context were changed."
+            )
+        # An advertised flag is necessary, not sufficient: the binary itself
+        # still validates exact enum values during startup, with original logs.
+
+    @staticmethod
     def _endpoint(config: ServerLaunchConfig) -> str:
         host = config.host.strip()
         if host in {"0.0.0.0", "::"}:
@@ -227,11 +260,13 @@ class OwnedServer:
                     pass
             time.sleep(0.25)
         tail = "\n".join(self._logs[-20:]) or "no server output"
-        raise ServerLaunchError(f"Timed out waiting for {url}.\n{tail}")
+        raise ServerStartupTimeout(f"Timed out waiting for {url}.\n{tail}")
 
-    def _raise_after_failed_start(self, error: ServerLaunchError) -> None:
+    def _raise_after_failed_start(self, error: ServerLaunchError, retain_on_timeout: bool = False) -> None:
         """Do not leave a failed launch holding the GPU or its TCP port."""
 
+        if retain_on_timeout and isinstance(error, ServerStartupTimeout):
+            raise error
         stopped = self.stop(lease_owner=self._lease_owner)
         suffix = (
             "The owned llama-server was stopped to release its GPU memory, system memory, and port. "
@@ -276,6 +311,8 @@ class OwnedServer:
         timeout_seconds: float = 120.0,
         lease_owner: str = "legacy",
         on_spawn: Callable[[int], None] | None = None,
+        retain_on_timeout: bool = False,
+        validate_custom_options: bool = False,
     ) -> ServerBackend:
         if wait_seconds <= 0:
             raise ValueError("wait_seconds must be positive")
@@ -291,7 +328,7 @@ class OwnedServer:
                 try:
                     url = self._wait_ready(config, float(wait_seconds))
                 except ServerLaunchError as exc:
-                    self._raise_after_failed_start(exc)
+                    self._raise_after_failed_start(exc, retain_on_timeout)
                 return self._make_backend(url, config, timeout_seconds)
             if self.is_running:
                 self.stop(lease_owner=lease_owner)
@@ -306,6 +343,8 @@ class OwnedServer:
                     "is intentionally managed outside Workbench."
                 )
             self._probe(binary)
+            if validate_custom_options:
+                self._check_custom_options(binary, config.extra_args)
             command = self._command_for(binary, config)
             self._logs = []
             self._capture_startup_logs = True
@@ -342,7 +381,7 @@ class OwnedServer:
             try:
                 url = self._wait_ready(config, float(wait_seconds))
             except ServerLaunchError as exc:
-                self._raise_after_failed_start(exc)
+                self._raise_after_failed_start(exc, retain_on_timeout)
             return self._make_backend(url, config, timeout_seconds)
 
     def acknowledge_dead(self, lease_owner: str) -> None:

@@ -1,6 +1,6 @@
 {
-  "request_id": "director-scene-001-v1",
-  "profile": "director-text",
+  "request_id": "request-001-v1",
+  "profile": "local-text",
   "payload": {
     "messages": [
       {"role": "system", "content": "Return a scene description as JSON."},

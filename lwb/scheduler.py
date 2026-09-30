@@ -6,12 +6,13 @@ provides FIFO arbitration with image graphs for the entire inference lifetime.
 
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import heapq
 import ipaddress
 import json
 import math
+import logging
 import os
 from pathlib import Path
 import re
@@ -23,7 +24,7 @@ import uuid
 
 import requests
 
-from .process import OWNED_SERVER, ServerLaunchConfig
+from .process import OWNED_SERVER, ServerLaunchConfig, ServerStartupTimeout
 
 NODE = "LlamaWorkbench_QueuedText"
 TERMINAL = {"completed", "failed", "cancelled", "result_unknown"}
@@ -142,6 +143,29 @@ def validate_payload(payload):
     return payload
 
 
+@dataclass(frozen=True, slots=True)
+class ManagedServerProfile(ServerLaunchConfig):
+    """Administrator-only scheduling policy; never read from an HTTP payload."""
+
+    startup_timeout_seconds: float = 600.0
+
+    def __post_init__(self):
+        ServerLaunchConfig.__post_init__(self)
+        value = self.startup_timeout_seconds
+        if type(value) not in (int, float) or not math.isfinite(value) or not 1 <= value <= 1800:
+            raise ValueError("startup_timeout_seconds must be a finite number in [1, 1800]")
+
+
+# Each option takes exactly one value. These are the explicitly supported
+# managed-profile variants, not a claim that every llama.cpp build supports them.
+CUSTOM_OPTION_VALUES = {
+    "--spec-type": {"draft-mtp"},
+    "--spec-draft-type-k": {"turbo3", "turbo4"},
+    "--spec-draft-type-v": {"turbo3", "turbo4"},
+    "--fit": {"on", "off"},
+}
+
+
 def load_profiles():
     """Only administrator-installed profiles can choose executable or argv."""
     filename = os.environ.get("LWB_PROFILES_FILE")
@@ -154,7 +178,7 @@ def load_profiles():
     from .process import _parse_extra_args
 
     for name, value in raw.items():
-        config = ServerLaunchConfig(**value)
+        config = ManagedServerProfile(**value)
         if config.host not in {"127.0.0.1", "::1", "localhost"}:
             raise ValueError("managed llama-server profiles must bind loopback")
         # Explicit build flags with fixed arity; no lifecycle/context override,
@@ -170,12 +194,26 @@ def load_profiles():
             "--threads-batch",
             "--chat-template",
             "--reasoning-format",
+            "--spec-draft-n-max",
+            *CUSTOM_OPTION_VALUES,
         }
+        seen = set()
         while args:
             flag = args.pop(0)
             if flag not in allowed or not args or args[0].startswith("--"):
                 raise ValueError(f"unsupported or incomplete explicit build option: {flag}")
-            args.pop(0)
+            if flag in seen:
+                raise ValueError(f"duplicate explicit build option: {flag}")
+            seen.add(flag)
+            argument = args.pop(0)
+            if flag in CUSTOM_OPTION_VALUES and argument not in CUSTOM_OPTION_VALUES[flag]:
+                raise ValueError(
+                    f"unsupported value for {flag}; allowed: {sorted(CUSTOM_OPTION_VALUES[flag])}"
+                )
+            if flag == "--spec-draft-n-max" and (
+                not re.fullmatch(r"[0-9]+", argument) or not 1 <= int(argument) <= 64
+            ):
+                raise ValueError("--spec-draft-n-max must be an integer in [1, 64]")
         profiles[name] = config
     return profiles
 
@@ -553,6 +591,7 @@ class Scheduler:
                 )
 
                 def spawned(pid):
+                    self.journal.update(rid, pid=pid)
                     self.journal.meta(
                         "lease",
                         {
@@ -566,7 +605,9 @@ class Scheduler:
                 self.journal.update(rid, gpu_budget=budget)
                 backend = self.server.start(
                     config,
-                    wait_seconds=600,
+                    wait_seconds=getattr(original_config, "startup_timeout_seconds", 600),
+                    retain_on_timeout=True,
+                    validate_custom_options=True,
                     timeout_seconds=3600,
                     lease_owner=lease_owner,
                     on_spawn=spawned,
@@ -623,6 +664,13 @@ class Scheduler:
                 )
             except CancelledBeforeInference:
                 return self.journal.update(rid, state="cancelled", cancellation="before_inference")
+            except ServerStartupTimeout as exc:
+                self.blocked = True
+                return self.journal.update(
+                    rid,
+                    state="result_unknown",
+                    error={"kind": "startup_timeout", "message": str(exc), "lease_retained": True},
+                )
             except CapabilityError as exc:
                 return self.journal.update(rid, state="failed", error=exc.detail)
             except requests.RequestException as exc:
@@ -916,3 +964,8 @@ def install():
                 SCHEDULER.blocked = True
 
     threading.Thread(target=idle, name="lwb-idle-release", daemon=True).start()
+    logging.info(
+        "[Llama Workbench] /lwb/v1 routes registered; %d administrator profiles; GPU quarantined=%s",
+        len(SCHEDULER.profiles),
+        SCHEDULER.blocked,
+    )

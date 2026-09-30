@@ -2,19 +2,15 @@
 
 [中文说明](README.zh-CN.md) | English
 
-An independent ComfyUI custom node package for local llama.cpp work. It is
-designed to coexist with `comfyui-llamacpp` and `comfyUI-llama-TE`: it uses its
-own node IDs (`LlamaWorkbench_*`), socket types (`LLAMA_WORKBENCH_*`), frontend
-extension (`LlamaWorkbench.SafeChat`), environment variable
-`LWB_LLAMA_SERVER_BINARY`, and owned-process registry.
+A ComfyUI custom node package for local text generation, multimodal prompting,
+interactive chat, and reusable prompt Skills. Connect to an existing
+OpenAI-compatible server, start a local `llama-server`, or use the optional
+`llama-cpp-python` backend.
 
-It combines the useful product capabilities without importing or replacing the
-other packages:
+Features:
 
 - Start and stop one positively-owned external `llama-server` process, with an
-  explicit binary path and shell-safe custom arguments. Compatible forks such
-  as a TurboQuant build work when they retain a `llama-server`-style HTTP chat
-  endpoint.
+  explicit binary path and shell-safe custom arguments supported by that executable.
 - Attach to another local OpenAI-compatible `llama-server` without assuming
   ownership of it.
 - Generate text or image-to-prompt results through either backend.
@@ -24,6 +20,8 @@ other packages:
 - Optionally load Qwen/Gemma-style local models through `llama-cpp-python`,
   including common multimodal chat handlers, KV q8_0 cache choices, and Qwen
   MoE CPU options when the installed binding supports them.
+- Queue text requests alongside image workflows through an authenticated API,
+  with persistent request IDs, structured results, and coordinated GPU use.
 - Keep a graph-serialized chat history with one native ComfyUI message field.
 - Load data-only Skills from this package's own `skills/` directory. Skills can
   request declared references, present stages and options, but are not tools
@@ -55,11 +53,13 @@ python -m pip install "llama-cpp-python>=0.3.37"
 
 Restart ComfyUI. The nodes appear under **Llama Workbench**.
 
-`wait_seconds` is the startup-readiness limit, not a model-generation limit.
+On **Llama Workbench Start Server**, `wait_seconds` is the startup-readiness limit,
+not a model-generation limit.
 For a first load of a large model, especially a Qwen/Gemma VLM with an mmproj,
 use 600–1800 seconds. If the limit expires, Workbench terminates its owned
 llama-server so its GPU memory, RAM, and port cannot block the next workflow.
-Increase the limit before retrying.
+Increase the limit before retrying. The queue API has a separate timeout policy:
+unknown startup outcomes retain their GPU lease; see [Queue API](docs/queue-api.md).
 
 For **Llama Workbench Start Server**, `timeout_seconds` is the separate limit
 for each Chat or Prompt request after the server is ready. It defaults to 120
@@ -73,8 +73,8 @@ long reasoning or unlimited-token responses.
 | Llama Workbench Start Server | Start one model with a chosen llama-server-compatible executable. `release_comfy_models` releases ComfyUI-managed GPU models before the server starts; `cleanup_previous_server` is now a compatibility-only input; external processes are never discovered or killed by executable/port. |
 | Llama Workbench Connection | Attach to an existing HTTP server without lifecycle ownership. |
 | Llama Workbench Stop Owned Server | Stops only the process launched by this package. |
-| Llama Workbench Server Status | Shows process identity, command, and bounded log tail. |
-| Llama Workbench H3 Auto Resolution Selector | Matches an input image to the nearest MiniMax H3 supported aspect ratio, then calculates compatible width and height at a target megapixel count. |
+| Llama Workbench Server Status | Shows process identity, lease state, and a bounded startup log tail. |
+| Llama Workbench H3 Auto Resolution Selector | Matches an input image to a supported aspect ratio and calculates width and height at a target megapixel count. |
 | Llama Workbench Embedded VL Model | Optional direct `llama-cpp-python` loader for Qwen/Gemma-style models. |
 | Llama Workbench Release Embedded Model | Closes an embedded model explicitly. |
 | Llama Workbench Prompt / Image2Prompt | Text prompting and image-to-prompt from a unified backend socket. Its image socket grows from `image` to `image1`, `image2`, and so on as connections are added (up to 10). It also has `seed`, `max_images`, `max_image_edge`, `auto_unload`, and a `thinking` control that defaults to `off`. |
@@ -85,7 +85,7 @@ long reasoning or unlimited-token responses.
 | Llama Workbench Image Info Display | Formats complete Image Info metadata as detailed, compact, or JSON text in Chinese or English and shows it in a scrollable canvas panel. |
 | Llama Workbench Pad Image to Multiple | Pads image width and height up to a selected multiple with a native color picker, optional alpha, and nine placement choices; outputs exact reversible padding metadata. |
 | Llama Workbench Restore Image from Padding | Uses the padding metadata to crop a processed padded image back to the original content rectangle and dimensions. |
-| Llama Workbench Chat | Interactive local chat: enter text and click its on-node **发送** button to queue only this Chat node and its upstream dependencies (no Queue Prompt click); it starts at a practical default size, remains freely resizable, and keeps long history in a scrollable canvas viewport. `clear_context_before_run` defaults to on, so every queued workflow starts fresh; turn it off for a continuing multi-turn conversation. `use_cache` defaults to on and reuses an unchanged complete request independently of `seed`; turn it off to force a fresh model request. While it is on, `release_comfy_cache_after_run` is skipped so the response remains reusable. `release_owned_server_after_run` defaults to on and stops an owned llama-server immediately after Chat responds, before downstream H3/video nodes allocate VRAM. **清空上下文** / **清空输入** actions and a text-token context meter are included. Start Server supplies the meter's `context_size` automatically; set `context_size` on an external Connection to obtain a percentage. Graph-persisted history, direct `max_tokens` / `seed` / `thinking` / `auto_unload` controls, and dynamic image sockets (up to 10) with `max_image_edge` are also included. |
+| Llama Workbench Chat | Interactive local chat: enter text and click its on-node **发送** button to queue only this Chat node and its upstream dependencies (no Queue Prompt click); it starts at a practical default size, remains freely resizable, and keeps long history in a scrollable canvas viewport. `clear_context_before_run` defaults to on, so every queued workflow starts fresh; turn it off for a continuing multi-turn conversation. `use_cache` defaults to on and reuses an unchanged complete request independently of `seed`; turn it off to force a fresh model request. While it is on, `release_comfy_cache_after_run` is skipped so the response remains reusable. `release_owned_server_after_run` defaults to on and stops an owned llama-server immediately after Chat responds, before downstream image or video nodes allocate VRAM. **清空上下文** / **清空输入** actions and a text-token context meter are included. Start Server supplies the meter's `context_size` automatically; set `context_size` on an external Connection to obtain a percentage. Graph-persisted history, direct `max_tokens` / `seed` / `thinking` / `auto_unload` controls, and dynamic image sockets (up to 10) with `max_image_edge` are also included. |
 | Llama Workbench Chat Output Display | Canvas-only terminal viewer that separately previews a Chat node's `thinking` and `assistant_message` outputs. |
 | Llama Workbench Chat Settings | System prompt, sampling, context-history, and image-size controls. |
 | Llama Workbench Skill Loader | Loads one package-local Skill, Auto selection, or normal chat. |
@@ -129,8 +129,7 @@ its `image` socket to create `image2`; each additional connection exposes the
 next socket, up to 10 images. `max_images` is the combined cap for all connected
 sockets and IMAGE batches.
 
-Chat does not impose H3-specific image-socket roles. The selected Skill and
-the user's request determine how connected images are interpreted.
+The selected Skill and the user's request determine how connected images are interpreted.
 
 ## Qwen-Image-2.1 Prompt Enhancer
 
@@ -233,14 +232,14 @@ arguments, and relies on the parser to require all ten tags in the rewritten
 prompt. It intentionally stops after Prompt Enhancer; use 06 for the complete
 diffusion-generation graph.
 
-## H3-compatible automatic resolution
+## Automatic image resolution
 
 **Llama Workbench H3 Auto Resolution Selector** accepts an `IMAGE`, a target
 `megapixels` value, and a rounding `multiple` (default 8). In its default
-`Auto (nearest input image)` mode it selects the closest one of the MiniMax H3
-Resolution Selector ratios: 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, or 21:9. It
-then uses the same target-pixel calculation and nearest-multiple rounding as
-the supplied H3 selector, outputting `width` and `height` for nodes such as
+`Auto (nearest input image)` mode it selects the closest supported aspect ratio:
+1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, or 21:9. It calculates dimensions from
+the target pixel count, rounds them to the selected multiple, and outputs
+`width` and `height` for nodes such as
 Empty Latent Image. Select a listed ratio manually to override Auto; the image
 input remains useful as a visual reference for the graph.
 
@@ -256,9 +255,9 @@ answer; the original thought remains on the `thinking` output. Chat Settings
 are rebuilt on every queue, so clearing its system prompt takes effect on the
 next run.
 
-## Custom server commands and TurboQuant-style builds
+## Server configuration and GPU memory
 
-When using one GPU alternately for MiniMax H3 and llama.cpp, keep Start Server's
+When sharing a GPU between image generation and text inference, keep Start Server's
 `release_comfy_models` enabled (the default). Before starting llama-server it
 calls ComfyUI's managed-model unload and CUDA-cache release, equivalent to the
 model-memory portion of **Free Model and Node Cache**. For a 35B model, also
@@ -288,49 +287,55 @@ model arbitrary tools. That keeps a prompt-writing Skill truthful in a ComfyUI
 graph: it can produce a generation plan or prompt, and the graph performs any
 actual generation.
 
-To add a Skill, create:
+Place each custom Skill in its own subdirectory under:
 
 ```text
-skills/my-skill/SKILL.md
-skills/my-skill/references/optional-guide.md
-skills/my-skill/runtime.json   # optional declarative routing and validation
+ComfyUI/custom_nodes/ComfyUI-Llama-Workbench/skills/
+└── my-skill/
+    ├── SKILL.md
+    ├── references/
+    │   └── optional-guide.md
+    └── runtime.json
 ```
 
-Use simple YAML frontmatter for `name` and `description`. References are
-limited to `.md`, `.txt`, `.json`, `.yaml`, and `.yml` files inside that Skill.
+Only `SKILL.md` is required. Use a directory name such as `my-skill`, starting
+with a letter or digit and containing letters, digits, hyphens, underscores, or dots. Start `SKILL.md` with a name,
+description, and your instructions:
+
+```markdown
+---
+name: Text editor
+description: Rewrite text clearly while preserving its meaning.
+---
+Rewrite the user's text in concise language. Return only the revised text.
+```
+
+Put supporting files in `references/`; supported types are `.md`, `.txt`,
+`.json`, `.yaml`, and `.yml`. After adding a Skill, refresh the ComfyUI page to
+reload the node definitions, then select its directory name in **Llama Workbench
+Skill Loader** and connect its `skill` output to **Llama Workbench Chat**.
+Select `Auto` for automatic selection or `None` for regular chat. For an
+existing Skill, copy its whole directory, including any referenced files,
+into this same `skills/` location.
 
 `runtime.json` is optional and data-only. A Skill can declare a plain
 `Field: value` selector in the user message, map route values to its own
 declared reference files, and provide output-format guidance to the model.
 Chat preloads the selected references before inference, but always accepts the
 model's final text: it does not validate, rewrite, retry, or reject a response
-based on headings, timestamps, labels, or any other inferred format. The core
-node has no H3-specific branch; Skills without a package-local runtime file
-retain the original model-requested reference flow.
+based on headings, timestamps, labels, or any other inferred format. Skills
+without `runtime.json` use model-requested reference loading.
 
-This repository does not bundle the MiniMax H3 prompt-writing Skill or its
-reference guides. To install the official upstream Skill in an environment that
-supports Agent Skills, follow the upstream instructions:
+## Process lifecycle
 
-```text
-npx skills add https://github.com/MiniMax-AI/MiniMax-H3 --skill h3-prompt-writing
-```
+Workbench tracks the exact child process it starts. Stop requests require the
+matching lease and an idle process; services attached through Connection remain
+under their external owner's control. Embedded models can be released explicitly
+with **Llama Workbench Release Embedded Model**.
 
-See the [official MiniMax H3 Skill](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/.agents/skills/h3-prompt-writing)
-for its prompt examples and reference guides. The command above installs that
-Skill outside this repository; the Llama Workbench Skill Loader only discovers
-Skills placed under this package's own `skills/` directory.
-
-This package also does not bundle MiniMax H3 model weights; use of those models
-remains subject to the upstream model license.
-
-## Coexistence and lifecycle guarantees
-
-This package does not monkey-patch `comfy.model_management`, register the
-shared `LLM` model folder, use another package's node IDs, or kill processes by
-name. Its stop node only targets the `subprocess.Popen` instance it created.
-An attached connection is never stopped by this package. Embedded model cleanup
-is explicit; it does not intercept ComfyUI's global unload action.
+The queue API coordinates complete text requests with native ComfyUI image
+execution. See [Queue API](docs/queue-api.md) for scheduling, idle release,
+cancellation, authentication, and recovery after uncertain results.
 
 ## Development
 
@@ -345,12 +350,13 @@ need ComfyUI, a model, or a GPU.
 
 ## License
 
-MIT. This project was independently implemented. It does not include source
-code or bundled assets copied from the two neighbouring custom-node folders.
+[MIT](LICENSE).
 
-## Director workbench integration
+## Queue API integration
 
-Use the native-queue text API for shared text/image GPU scheduling, durable request IDs,
-structured results and targeted cancellation. See [API documentation](docs/director-api.md)
-and the importable [Postman collection](examples/api/director.postman_collection.json).
-Existing direct llama.cpp calls must migrate to this API to participate in the GPU lease.
+Use the queue API to integrate desktop applications, batch scripts, web services,
+or other workflow tools with ComfyUI. Text and image jobs share GPU scheduling;
+requests have persistent IDs, structured results, and targeted cancellation.
+See [API documentation](docs/queue-api.md) and the importable
+[Postman collection](examples/api/queue-api.postman_collection.json).
+Submit text through this API to participate in the GPU lease.

@@ -20,3 +20,19 @@ The server and ComfyUI process must both be able to access the paths you enter.
 The Connection examples do not start or stop the target endpoint. Use
 `model_name` only when attaching to a router and set it to that router's exact
 model ID. The Start Server example owns only the process it launches.
+
+## Queue API examples
+
+The `api/` subdirectory contains HTTP client examples for applications and batch
+scripts. These are separate from the ComfyUI canvas workflows listed above:
+
+- [Basic server profiles](api/profiles.json): configure a local server and model.
+- [Optional MTP profile](api/profiles-mtp.json): an explicit configuration example
+  for a build that supports these options; tune model paths and resource settings.
+- [Structured text request](api/text-request.json): submit a request with a JSON schema.
+- [Postman collection](api/queue-api.postman_collection.json): submit, query, cancel,
+  and reconcile requests.
+
+See [Queue API documentation](../docs/queue-api.md) for authentication,
+GPU scheduling, and runtime setup. Profile names and request IDs are examples;
+choose your own names consistently across configuration and client requests.
