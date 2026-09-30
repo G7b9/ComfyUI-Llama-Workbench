@@ -62,7 +62,7 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 
 | 节点 | 用途 |
 |---|---|
-| Llama Workbench Start Server | 使用指定的 llama-server 兼容可执行文件启动一个模型。服务器启动前，`release_comfy_models` 会释放 ComfyUI 管理的 GPU 模型；默认开启的 `cleanup_previous_server` 会清理使用相同可执行文件和端口的陈旧服务器。两者适合在同一块 GPU 上交替使用 MiniMax H3。 |
+| Llama Workbench Start Server | 使用指定的 llama-server 兼容可执行文件启动一个模型。服务器启动前，`release_comfy_models` 会释放 ComfyUI 管理的 GPU 模型；`cleanup_previous_server` 仅保留输入兼容，不再按可执行文件或端口清理外部进程。 |
 | Llama Workbench Connection | 连接已有的 HTTP 服务器，不接管其生命周期。 |
 | Llama Workbench Stop Owned Server | 只停止由本包启动的进程。 |
 | Llama Workbench Server Status | 显示进程身份、命令和有限长度的日志尾部。 |
@@ -221,8 +221,8 @@ Chat 会将思考轨迹放到 `thinking` 输出，只将最终答案放到 `assi
 `release_comfy_models` 开启（默认值）。启动 llama-server 前，它会调用 ComfyUI 的受管
 模型卸载和 CUDA 缓存释放，效果相当于 **Free Model and Node Cache** 中的模型内存部分。
 对于 35B 模型，建议将 `wait_seconds` 设置为至少 `600`；旧工作流可能仍保存着之前的
-60 或 300 秒值。同时保持 `cleanup_previous_server` 开启，它会在下一次启动前停止与可执行
-文件和端口匹配的旧 Workbench 服务器。不要用 Start Server 管理手动启动的服务器；这种
+60 或 300 秒值。`cleanup_previous_server` 只保留旧工作流输入兼容，
+不会扫描或终止与可执行文件、端口匹配的进程。不要用 Start Server 管理手动启动的服务器；这种
 情况应使用 **Llama Workbench Connection**。
 
 Start Server 执行的是 argv 数组，不是 shell 命令。`extra_args` 使用跨平台的双引号参数
@@ -291,3 +291,9 @@ Skill 状态解析。测试不需要 ComfyUI、模型或 GPU。
 ## 许可证
 
 MIT。本项目为独立实现，不包含从相邻两个自定义节点目录复制的源代码或捆绑资源。
+
+## 导演工作台统一调度
+
+新增与原生图片队列互斥的文本 API，支持持久 request_id、结构化响应、目标取消与未知结果隔离。
+详见 [API 文档](docs/director-api.md) 和可导入的 [Postman 集合](examples/api/director.postman_collection.json)。
+导演台须将直接 llama.cpp 推理迁移到此 API，才能覆盖完整推理周期的 GPU 租约。

@@ -70,7 +70,7 @@ long reasoning or unlimited-token responses.
 
 | Node | Use |
 |---|---|
-| Llama Workbench Start Server | Start one model with a chosen llama-server-compatible executable. `release_comfy_models` releases ComfyUI-managed GPU models before the server starts; `cleanup_previous_server` (on by default) clears a stale server using the same executable and port. Both are useful when alternating with MiniMax H3 on one GPU. |
+| Llama Workbench Start Server | Start one model with a chosen llama-server-compatible executable. `release_comfy_models` releases ComfyUI-managed GPU models before the server starts; `cleanup_previous_server` is now a compatibility-only input; external processes are never discovered or killed by executable/port. |
 | Llama Workbench Connection | Attach to an existing HTTP server without lifecycle ownership. |
 | Llama Workbench Stop Owned Server | Stops only the process launched by this package. |
 | Llama Workbench Server Status | Shows process identity, command, and bounded log tail. |
@@ -263,9 +263,8 @@ When using one GPU alternately for MiniMax H3 and llama.cpp, keep Start Server's
 calls ComfyUI's managed-model unload and CUDA-cache release, equivalent to the
 model-memory portion of **Free Model and Node Cache**. For a 35B model, also
 set `wait_seconds` to at least `600`; older saved workflows may still contain
-the prior 60- or 300-second value. Keep `cleanup_previous_server` enabled as well: it
-stops a previous timed-out Workbench server matching this executable and port
-before the next launch. Do not use Start Server to manage a manually launched
+the prior 60- or 300-second value. `cleanup_previous_server` is retained only for workflow compatibility; it never
+scans or terminates processes by executable or port. Do not use Start Server to manage a manually launched
 server; use **Llama Workbench Connection** for that case.
 
 Start Server executes an argv array, never a shell command. `extra_args` uses
@@ -348,3 +347,10 @@ need ComfyUI, a model, or a GPU.
 
 MIT. This project was independently implemented. It does not include source
 code or bundled assets copied from the two neighbouring custom-node folders.
+
+## Director workbench integration
+
+Use the native-queue text API for shared text/image GPU scheduling, durable request IDs,
+structured results and targeted cancellation. See [API documentation](docs/director-api.md)
+and the importable [Postman collection](examples/api/director.postman_collection.json).
+Existing direct llama.cpp calls must migrate to this API to participate in the GPU lease.

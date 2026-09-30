@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import signal
 import shlex
 import shutil
 import subprocess
@@ -12,7 +11,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import requests
 
@@ -91,6 +90,11 @@ class OwnedServer:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
+        self._log_lock = threading.Lock()
+        self._lease_owner = "legacy"
+        self._active_requests = 0
+        self._session = requests.Session()
+        self._session.trust_env = False
         self._process: subprocess.Popen[str] | None = None
         self._config_fingerprint = ""
         self._config: ServerLaunchConfig | None = None
@@ -98,6 +102,7 @@ class OwnedServer:
         self._command: list[str] = []
         self._started_at: float | None = None
         self._logs: list[str] = []
+        self._capture_startup_logs = True
         self._log_thread: threading.Thread | None = None
 
     @property
@@ -110,12 +115,21 @@ class OwnedServer:
         with self._lock:
             return self.is_running and self._config == config
 
+    @staticmethod
+    def _redact(line: str) -> str:
+        import re
+        if re.search(r"prompt|authorization|api[_-]?key|bearer", line, re.I):
+            return "[private diagnostic line omitted]"
+        return line
+
     def _record_logs(self, process: subprocess.Popen[str]) -> None:
         if process.stdout is None:
             return
         for line in iter(process.stdout.readline, ""):
-            with self._lock:
-                self._logs.append(line.rstrip())
+            with self._log_lock:
+                if not self._capture_startup_logs:
+                    continue
+                self._logs.append(self._redact(line.rstrip()))
                 if len(self._logs) > 200:
                     del self._logs[:-200]
 
@@ -166,6 +180,8 @@ class OwnedServer:
         host = config.host.strip()
         if host in {"0.0.0.0", "::"}:
             host = "127.0.0.1"
+        if ":" in host:
+            host = f"[{host}]"
         return normalize_server_url(f"http://{host}:{config.port}")
 
     @classmethod
@@ -180,7 +196,9 @@ class OwnedServer:
         url = cls._endpoint(config)
         for path in ("/health", "/v1/models", "/props"):
             try:
-                response = requests.get(url + path, timeout=0.75)
+                with requests.Session() as session:
+                    session.trust_env = False
+                    response = session.get(url + path, timeout=0.75)
                 if response.status_code < 500:
                     return True
             except requests.RequestException:
@@ -193,12 +211,17 @@ class OwnedServer:
         probe_paths = ("/health", "/v1/models", "/props")
         while time.monotonic() < deadline:
             if not self.is_running:
+                if self._log_thread is not None:
+                    self._log_thread.join(timeout=2)
                 tail = "\n".join(self._logs[-20:]) or "no server output"
                 raise ServerLaunchError(f"llama-server exited during startup.\n{tail}")
             for path in probe_paths:
                 try:
-                    response = requests.get(url + path, timeout=1.5)
-                    if response.status_code < 500:
+                    response = self._session.get(url + path, timeout=1.5)
+                    if path == "/health" and response.status_code == 503:
+                        break  # /models may already return 200 while weights are loading
+                    if response.status_code == 200:
+                        self._capture_startup_logs = False
                         return url
                 except requests.RequestException:
                     pass
@@ -206,101 +229,10 @@ class OwnedServer:
         tail = "\n".join(self._logs[-20:]) or "no server output"
         raise ServerLaunchError(f"Timed out waiting for {url}.\n{tail}")
 
-    @staticmethod
-    def _process_argv(pid: int) -> list[str] | None:
-        """Read argv on Linux without guessing from ``ps`` output.
-
-        The package only uses this to remove a stale server that was started
-        through Start Server.  Returning ``None`` on other systems keeps the
-        cleanup conservative rather than trying to discover arbitrary
-        llama.cpp processes by name.
-        """
-
-        cmdline = Path(f"/proc/{pid}/cmdline")
-        try:
-            parts = cmdline.read_bytes().split(b"\0")
-        except OSError:
-            return None
-        return [os.fsdecode(part) for part in parts if part]
-
-    @staticmethod
-    def _argv_uses_port(argv: list[str], port: int) -> bool:
-        target = str(int(port))
-        return any(arg == "--port" and index + 1 < len(argv) and argv[index + 1] == target for index, arg in enumerate(argv))
-
-    @staticmethod
-    def _same_binary(first: str, second: str) -> bool:
-        try:
-            return Path(first).resolve() == Path(second).resolve()
-        except OSError:
-            return first == second
-
-    @classmethod
-    def _is_conflicting_server_argv(cls, argv: list[str] | None, binary: str, port: int) -> bool:
-        return bool(argv and cls._same_binary(argv[0], binary) and cls._argv_uses_port(argv, port))
-
-    @staticmethod
-    def _pid_is_alive(pid: int) -> bool:
-        try:
-            os.kill(pid, 0)
-            return True
-        except (ProcessLookupError, PermissionError, OSError):
-            return False
-
-    def _terminate_pid(self, pid: int) -> bool:
-        """Terminate a positively matched stale child server on Unix."""
-
-        if pid <= 0 or pid == os.getpid() or os.name == "nt" or not self._pid_is_alive(pid):
-            return False
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            return False
-        deadline = time.monotonic() + 8.0
-        while time.monotonic() < deadline:
-            if not self._pid_is_alive(pid):
-                return True
-            time.sleep(0.1)
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            return not self._pid_is_alive(pid)
-        return True
-
-    def _cleanup_conflicting_servers(self, binary: str, port: int) -> list[int]:
-        """Remove stale Start Server processes matching the binary and port.
-
-        A timeout used to intentionally leave the child process alive.  That
-        is unsafe for a GPU-shared workflow: the orphan retains VRAM, RAM and
-        the port.  Match the exact executable and ``--port`` from a Linux
-        argv record, never a loose process-name search.  Users who intentionally
-        run a server outside Workbench should use the Connection node instead
-        of enabling this lifecycle management path.
-        """
-
-        proc_root = Path("/proc")
-        if os.name == "nt" or not proc_root.is_dir():
-            return []
-        stopped: list[int] = []
-        try:
-            entries = list(proc_root.iterdir())
-        except OSError:
-            return stopped
-        for entry in entries:
-            if not entry.name.isdecimal():
-                continue
-            pid = int(entry.name)
-            argv = self._process_argv(pid)
-            if not self._is_conflicting_server_argv(argv, binary, port):
-                continue
-            if self._terminate_pid(pid):
-                stopped.append(pid)
-        return stopped
-
     def _raise_after_failed_start(self, error: ServerLaunchError) -> None:
         """Do not leave a failed launch holding the GPU or its TCP port."""
 
-        stopped = self.stop()
+        stopped = self.stop(lease_owner=self._lease_owner)
         suffix = (
             "The owned llama-server was stopped to release its GPU memory, system memory, and port. "
             "Increase wait_seconds before trying again."
@@ -342,12 +274,17 @@ class OwnedServer:
         wait_seconds: float = 60.0,
         cleanup_previous_server: bool = True,
         timeout_seconds: float = 120.0,
+        lease_owner: str = "legacy",
+        on_spawn: Callable[[int], None] | None = None,
     ) -> ServerBackend:
         if wait_seconds <= 0:
             raise ValueError("wait_seconds must be positive")
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         with self._lock:
+            if self.is_running and (self._lease_owner != lease_owner or self._active_requests):
+                raise ServerLaunchError("Owned process belongs to another lease or is busy")
+            self._lease_owner = lease_owner
             binary = _resolve_binary(config.binary_path)
             fingerprint = config.fingerprint(binary)
             if self.is_running and self._config_fingerprint == fingerprint:
@@ -357,9 +294,9 @@ class OwnedServer:
                     self._raise_after_failed_start(exc)
                 return self._make_backend(url, config, timeout_seconds)
             if self.is_running:
-                self.stop()
-            if cleanup_previous_server:
-                self._cleanup_conflicting_servers(binary, config.port)
+                self.stop(lease_owner=lease_owner)
+            # cleanup_previous_server remains an inert compatibility input.
+            # Executable names and ports never establish process ownership.
             endpoint = self._endpoint(config)
             if self._endpoint_responds(config):
                 raise ServerLaunchError(
@@ -371,6 +308,7 @@ class OwnedServer:
             self._probe(binary)
             command = self._command_for(binary, config)
             self._logs = []
+            self._capture_startup_logs = True
             creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
             try:
                 process = subprocess.Popen(
@@ -396,14 +334,41 @@ class OwnedServer:
             self._log_thread = threading.Thread(target=self._record_logs, args=(process,), daemon=True)
             self._log_thread.start()
             try:
+                if on_spawn is not None:
+                    on_spawn(process.pid)
+            except Exception:
+                self.stop(lease_owner=lease_owner)
+                raise
+            try:
                 url = self._wait_ready(config, float(wait_seconds))
             except ServerLaunchError as exc:
                 self._raise_after_failed_start(exc)
             return self._make_backend(url, config, timeout_seconds)
 
-    def stop(self) -> bool:
+    def acknowledge_dead(self, lease_owner: str) -> None:
+        """Clear a pinned execution only after this exact child has exited."""
+        with self._lock:
+            if self._lease_owner != lease_owner or self.is_running:
+                raise ServerLaunchError("Cannot acknowledge a live or foreign process")
+            self._active_requests = 0
+
+    def begin_request(self, lease_owner: str) -> None:
+        with self._lock:
+            if self._lease_owner != lease_owner or not self.is_running:
+                raise ServerLaunchError("No live process for this execution lease")
+            self._active_requests += 1
+
+    def end_request(self, lease_owner: str) -> None:
+        with self._lock:
+            if self._lease_owner != lease_owner or self._active_requests < 1:
+                raise ServerLaunchError("Execution lease mismatch")
+            self._active_requests -= 1
+
+    def stop(self, lease_owner: str = "legacy") -> bool:
         """Stop only the exact process started by this object."""
         with self._lock:
+            if self._lease_owner != lease_owner or self._active_requests:
+                raise ServerLaunchError("Cannot stop another caller lease or an active request")
             process = self._process
             if process is None:
                 return False
@@ -414,6 +379,8 @@ class OwnedServer:
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=4)
+            if self._log_thread is not None:
+                self._log_thread.join(timeout=2)
             self._process = None
             self._config_fingerprint = ""
             self._config = None
@@ -431,7 +398,8 @@ class OwnedServer:
                 "returncode": self._process.poll() if self._process is not None else None,
                 "started_at": self._started_at,
                 "binary": self._binary or None,
-                "command": list(self._command),
+                "lease_owner": self._lease_owner,
+                "active_requests": self._active_requests,
                 "log_tail": self._logs[-30:],
             }
 

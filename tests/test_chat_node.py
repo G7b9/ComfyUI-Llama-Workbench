@@ -390,7 +390,7 @@ def test_auto_unload_only_releases_workbench_owned_backends(monkeypatch):
     assert nodes_module._auto_unload_backend(embedded, True) is True
     assert stops == [True]
     assert embedded_releases == [embedded]
-    assert LlamaWorkbenchStartServer.IS_CHANGED() is False
+    assert math.isnan(LlamaWorkbenchStartServer.IS_CHANGED())
 
 
 def test_cached_start_server_backend_restarts_only_when_a_new_request_needs_it(monkeypatch):

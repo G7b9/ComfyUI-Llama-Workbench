@@ -35,6 +35,7 @@ from .skills import (
     parse_skill_state,
 )
 from .seed import LlamaWorkbenchSeed
+from .scheduler import LlamaWorkbenchQueuedText
 
 
 BACKEND_TYPE = "LLAMA_WORKBENCH_BACKEND"
@@ -412,15 +413,13 @@ class LlamaWorkbenchStartServer:
                 "wait_seconds": ("FLOAT", {"default": 600.0, "min": 1.0, "max": 1800.0, "step": 1.0, "tooltip": "Maximum time to wait for llama-server readiness. Large 35B VLMs may need 600 seconds or more on a cold load."}),
                 "timeout_seconds": ("FLOAT", {"default": 120.0, "min": 1.0, "max": 3600.0, "step": 1.0, "tooltip": "Maximum time to wait for one Chat or Prompt response from this server. Increase to 600 seconds or more for long reasoning or unlimited-token responses."}),
                 "release_comfy_models": ("BOOLEAN", {"default": True, "tooltip": "Before starting llama-server, unload ComfyUI-managed GPU models and empty PyTorch cache. Keep enabled when alternating with MiniMax H3 on one GPU."}),
-                "cleanup_previous_server": ("BOOLEAN", {"default": True, "tooltip": "Before starting, stop a leftover llama-server using this binary and port. This clears a timed-out prior Workbench launch. For a server managed outside Workbench, use Llama Workbench Connection instead."}),
+                "cleanup_previous_server": ("BOOLEAN", {"default": True, "tooltip": "Deprecated compatibility input. Only the process positively owned by this Workbench session can be stopped."}),
             },
         }
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        # Inputs are already part of ComfyUI's cache key. A cached backend
-        # restarts itself lazily if a later uncached request needs it.
-        return False
+        return float("nan")
 
     def start(
         self,
@@ -479,6 +478,10 @@ class LlamaWorkbenchStopServer:
     FUNCTION = "stop"
 
     @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("nan")
+
+    @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"stop": ("BOOLEAN", {"default": True})}}
 
@@ -492,6 +495,10 @@ class LlamaWorkbenchServerStatus:
     RETURN_TYPES = ("STRING", "BOOLEAN")
     RETURN_NAMES = ("status_json", "running")
     FUNCTION = "get_status"
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("nan")
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -1554,3 +1561,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LlamaWorkbench_PadImageToMultiple": "Llama Workbench Pad Image to Multiple",
     "LlamaWorkbench_RestoreImageFromPadding": "Llama Workbench Restore Image from Padding",
 }
+
+# Queue job outputs contain only request identity/state; results use the authenticated API.
+NODE_CLASS_MAPPINGS["LlamaWorkbench_QueuedText"] = LlamaWorkbenchQueuedText
+NODE_DISPLAY_NAME_MAPPINGS["LlamaWorkbench_QueuedText"] = "Llama Workbench Queued Text Request"

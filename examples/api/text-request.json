@@ -1,0 +1,26 @@
+{
+  "request_id": "director-scene-001-v1",
+  "profile": "director-text",
+  "payload": {
+    "messages": [
+      {"role": "system", "content": "Return a scene description as JSON."},
+      {"role": "user", "content": "A quiet forest in the early morning."}
+    ],
+    "temperature": 0.2,
+    "max_tokens": 512,
+    "chat_template_kwargs": {"enable_thinking": false},
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "scene",
+        "strict": true,
+        "schema": {
+          "type": "object",
+          "properties": {"description": {"type": "string"}},
+          "required": ["description"],
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

@@ -106,11 +106,8 @@ def test_timed_out_owned_process_is_stopped_and_releases_its_port(monkeypatch, t
     assert server.is_running is False
 
 
-def test_stale_cleanup_only_targets_the_configured_binary_and_port():
-    server = OwnedServer()
-    assert server._is_conflicting_server_argv(["/opt/llama-server", "--port", "50003"], "/opt/llama-server", 50003)
-    assert not server._is_conflicting_server_argv(["/opt/llama-server", "--port", "8080"], "/opt/llama-server", 50003)
-    assert not server._is_conflicting_server_argv(["/opt/other-server", "--port", "50003"], "/opt/llama-server", 50003)
+def test_no_process_discovery_or_port_based_cleanup():
+    assert not hasattr(OwnedServer, "_cleanup_conflicting_servers")
 
 
 def test_start_refuses_a_preexisting_unowned_server(monkeypatch, tmp_path):
@@ -124,3 +121,50 @@ def test_start_refuses_a_preexisting_unowned_server(monkeypatch, tmp_path):
 
     with pytest.raises(ServerLaunchError, match="not owned by this Workbench session"):
         server.start(config)
+
+
+def test_startup_failure_diagnostics_are_drained_while_lifecycle_lock_held(tmp_path):
+    import os
+    import sys
+    if os.name == "nt":
+        pytest.skip("test executable uses a POSIX shebang")
+    binary = tmp_path / "fake-llama-server"
+    binary.write_text(f"#!{sys.executable}\nimport sys\nif '--version' in sys.argv: sys.exit(0)\nprint('CUDA allocation failed: model traceback', flush=True)\nsys.exit(1)\n")
+    binary.chmod(0o700)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"gguf")
+    server = OwnedServer()
+    # No service is adopted or terminated; avoid any dependency on a free port.
+    server._endpoint_responds = lambda config: False
+    with pytest.raises(ServerLaunchError, match="CUDA allocation failed"):
+        server.start(ServerLaunchConfig(str(binary), str(model), port=65534), wait_seconds=3)
+    assert not server.is_running
+
+
+def test_startup_probes_ignore_inherited_socks_proxy(monkeypatch):
+    monkeypatch.setenv("ALL_PROXY", "socks5://invalid.invalid:1080")
+    monkeypatch.setenv("HTTP_PROXY", "socks5://invalid.invalid:1080")
+    observed = []
+    def get(session, url, **kwargs):
+        observed.append(session.trust_env)
+        return type("Response", (), {"status_code": 200})()
+    monkeypatch.setattr(process_module.requests.Session, "get", get)
+    config = ServerLaunchConfig("unused", "unused")
+    assert OwnedServer._endpoint_responds(config)
+    server = OwnedServer()
+    server._process = type("Process", (), {"poll": lambda self: None})()
+    assert server._wait_ready(config, 1).startswith("http://127.0.0.1")
+    assert observed == [False, False]
+
+
+def test_models_200_does_not_override_loading_health(monkeypatch):
+    server = OwnedServer()
+    server._process = type("Process", (), {"poll": lambda self: None})()
+    calls = []
+    def get(url, **kwargs):
+        calls.append(url)
+        return type("Response", (), {"status_code": 503 if url.endswith("/health") else 200})()
+    monkeypatch.setattr(server._session, "get", get)
+    with pytest.raises(ServerLaunchError, match="Timed out"):
+        server._wait_ready(ServerLaunchConfig("unused", "unused"), 0.01)
+    assert all(url.endswith("/health") for url in calls)

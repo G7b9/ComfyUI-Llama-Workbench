@@ -1,0 +1,12 @@
+{
+  "director-text": {
+    "binary_path": "/opt/llama.cpp/bin/llama-server",
+    "model_path": "/models/text-model.gguf",
+    "host": "127.0.0.1",
+    "port": 8080,
+    "context_size": 8192,
+    "gpu_layers": -1,
+    "mmproj_path": "",
+    "extra_args": "--flash-attn on --cache-type-k q8_0 --cache-type-v q8_0"
+  }
+}
