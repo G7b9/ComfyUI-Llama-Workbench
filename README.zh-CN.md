@@ -115,6 +115,10 @@ Server** 启动的精确 `llama-server` 进程，或释放 Workbench 的嵌入�
 
 连接图像的具体解释由选中的 Skill 和用户请求决定。
 
+Chat 完成后会保留输入消息，修改 `thinking` 等请求参数后再次排队，会使用同一条消息重新推理。
+需要清空时点击 **清空输入**。参数变化会使对应的旧结果缓存失效；仅修改控件不会自动排队，
+也不会改变已经提交、正在执行的请求。
+
 ## Qwen-Image-2.1 Prompt Enhancer
 
 使用兼容的 `llama-server` 和本地 GGUF 配置 **Llama Workbench Start Server**，再将

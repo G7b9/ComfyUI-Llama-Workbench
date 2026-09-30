@@ -131,6 +131,11 @@ sockets and IMAGE batches.
 
 The selected Skill and the user's request determine how connected images are interpreted.
 
+Chat keeps its message input after completion, so changing `thinking` or other
+request parameters and queuing again uses the same message. Use **清空输入** to
+clear it explicitly. Changed inputs invalidate the corresponding cached result;
+editing a widget alone does not queue a new run or alter a request already running.
+
 ## Qwen-Image-2.1 Prompt Enhancer
 
 Use **Llama Workbench Start Server** with a compatible `llama-server` and local

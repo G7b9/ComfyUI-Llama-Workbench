@@ -615,8 +615,9 @@ function onChatExecuted(node, output) {
     node.properties ||= {};
     node.properties.lwb_context_state = contextState;
     if (sent) {
-        const message = findWidget(node, "lwb_user_message");
-        if (message) message.value = "";
+        // Keep the submitted input available for parameter changes and reruns.
+        // Executed events also replay cached output; they must not mutate the
+        // next request. Input is cleared only by the explicit clear action.
         node.__lwbChatScrollToBottom = true;
         setBusy(node, false, "准备就绪。", "idle");
     }
