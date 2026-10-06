@@ -821,6 +821,61 @@ def guard_executor(scheduler, original):
     return guarded
 
 
+def lifecycle_restriction_enabled():
+    """Read only server configuration, with explicit boolean semantics."""
+    name = "LWB_RESTRICT_LIFECYCLE"
+    value = os.environ.get(name, "false").strip().lower()
+    if value in {"true", "1", "yes", "on"}:
+        return True
+    if value in {"false", "0", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be true/false, 1/0, yes/no, or on/off")
+
+
+def create_lifecycle_middleware():
+    """Capture server policy at installation, never from HTTP/workflow inputs."""
+    from aiohttp import web
+
+    restrict_lifecycle = lifecycle_restriction_enabled()
+
+    @web.middleware
+    async def protect_lifecycle(request, handler):
+        if request.method == "POST" and request.path in {"/prompt", "/api/prompt"}:
+            body = await request.json()
+            prompt = body.get("prompt", {})
+            sensitive_nodes = {"LlamaWorkbench_StartServer", "LlamaWorkbench_StopServer"}
+            if isinstance(prompt, dict) and any(
+                isinstance(n, dict) and n.get("class_type") == NODE for n in prompt.values()
+            ):
+                raise web.HTTPForbidden(
+                    text="QueuedText is internal; submit through /lwb/v1/requests"
+                )
+            if (
+                restrict_lifecycle
+                and isinstance(prompt, dict)
+                and any(
+                    isinstance(n, dict) and n.get("class_type") in sensitive_nodes
+                    for n in prompt.values()
+                )
+            ):
+                try:
+                    authorize(request, allow_local_ui=True)
+                except PermissionError:
+                    raise web.HTTPForbidden(
+                        text="LWB lifecycle nodes require local or authenticated access"
+                    )
+                # Strict mode preserves the original local-only lifecycle policy.
+                peer = request.transport.get_extra_info("peername") if request.transport else None
+                local = bool(peer) and ipaddress.ip_address(peer[0]).is_loopback
+                if not local:
+                    raise web.HTTPForbidden(
+                        text="Remote lifecycle nodes are disabled; use administrator profiles at /lwb/v1/requests"
+                    )
+        return await handler(request)
+
+    return protect_lifecycle
+
+
 def install():
     """Fail closed if the expected native-worker integration cannot be installed."""
     global SCHEDULER
@@ -848,6 +903,7 @@ def install():
         ]
 
     execution.PromptExecutor.execute = installation_failed
+    protect_lifecycle = create_lifecycle_middleware()
     state_dir = Path(
         os.environ.get("LWB_STATE_DIR", str(Path(folder_paths.get_user_directory()) / "lwb"))
     )
@@ -913,38 +969,6 @@ def install():
         import asyncio
 
         return web.json_response(await asyncio.to_thread(SCHEDULER.reconcile))
-
-    @web.middleware
-    async def protect_lifecycle(request, handler):
-        if request.method == "POST" and request.path in {"/prompt", "/api/prompt"}:
-            body = await request.json()
-            prompt = body.get("prompt", {})
-            sensitive_nodes = {"LlamaWorkbench_StartServer", "LlamaWorkbench_StopServer", NODE}
-            if isinstance(prompt, dict) and any(
-                isinstance(n, dict) and n.get("class_type") == NODE for n in prompt.values()
-            ):
-                raise web.HTTPForbidden(
-                    text="QueuedText is internal; submit through /lwb/v1/requests"
-                )
-            if isinstance(prompt, dict) and any(
-                isinstance(n, dict) and n.get("class_type") in sensitive_nodes
-                for n in prompt.values()
-            ):
-                try:
-                    authorize(request, allow_local_ui=True)
-                except PermissionError:
-                    raise web.HTTPForbidden(
-                        text="LWB lifecycle nodes require local or authenticated access"
-                    )
-                # Even authenticated API clients cannot select arbitrary executables.
-                # Legacy loopback UI retains its explicitly configured binary widget.
-                peer = request.transport.get_extra_info("peername") if request.transport else None
-                local = bool(peer) and ipaddress.ip_address(peer[0]).is_loopback
-                if not local:
-                    raise web.HTTPForbidden(
-                        text="Remote lifecycle nodes are disabled; use administrator profiles at /lwb/v1/requests"
-                    )
-        return await handler(request)
 
     instance.app.middlewares.append(protect_lifecycle)
 

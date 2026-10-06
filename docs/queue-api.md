@@ -66,7 +66,7 @@ export LWB_API_TOKEN='replace-with-a-long-random-secret'
 应用数据保护与备份。不要删除状态数据库后重启来绕过未知租约，不要在多个 worker 间共享
 数据库。只支持一个 ComfyUI 进程/原生 worker；需要多个实例时须使用独立 GPU/端口/状态目录。
 
-未配置 token 时只接受 TCP loopback 调用；配置 token 后包括本机在内都需要 Bearer。
+对 `/lwb/v1/*` 管理 API，未配置 token 时只接受 TCP loopback 调用；配置 token 后包括本机在内都需要 Bearer。
 局域网调用必须认证，忽略 `X-Forwarded-For`，拒绝浏览器 Origin 的控制 API 请求。
 反向代理必须配置 token，不能依赖代理到后端的 loopback 地址作为用户身份。
 多个调用方使用如下环境变量代替单 token（它优先于 `LWB_API_TOKEN`）：
@@ -76,9 +76,18 @@ export LWB_API_TOKENS_JSON='{"client-a":"secret-a","client-b":"secret-b"}'
 ```
 
 认证身份只能查询/取消自己的请求。各身份都可以选择已安装的 profiles。
-远端原生 `/prompt` 中的生命周期节点禁止执行，即使有 token；请使用受限 profile API。
-本机原生工作流仍可使用原有二进制 widget。配置 token 时，本机生命周期 HTTP 调用也需带
-认证；普通图片 `/prompt` 不受此中间件影响。纯状态节点不会公开命令行凭据。
+原生 `/prompt`、`/api/prompt` 默认使用 ComfyUI 自身的访问控制：所有能提交 workflow 的
+调用方都能使用 Start Server／Stop Server，包括内网网页用户，无需额外 Workbench token。
+原有 workflow 中的程序路径、模型路径、端口及启动参数可继续使用，无需改为 profile。
+此默认行为不把 `/lwb/v1/*` 管理 API 的权限授予这些调用方。
+
+需要恢复旧行为时，在 **ComfyUI 服务器启动环境**设置 `LWB_RESTRICT_LIFECYCLE=true`。
+未设置默认 `false`；支持 `true/false`、`1/0`、`yes/no`、`on/off`，忽略大小写和两端空白，
+空字符串及其他值会报配置错误。初始化时固定策略，HTTP 或 workflow 不能覆盖；配置更改需
+在计划中的服务重启时加载。严格模式保留原有本机 Origin／loopback 规则与 token 要求，
+非 loopback 的生命周期提交即使携带有效 token 仍拒绝。
+两种模式均禁止将内部 `QueuedText` 节点直接提交到原生队列入口；进程所有权、复用、
+并发保护及 GPU 调度不变。纯状态节点不会公开命令行凭据。
 启动日志只保留启动阶段的诊断，抑制含 prompt/authorization/API key/Bearer 标记的行；
 就绪后继续排空日志管道但不记录推理日志。API 不向 ComfyUI 历史或 websocket 写入提示词/
 模型响应。llama 本地传输与启动健康检查均禁用环境代理，因此继承 SOCKS/HTTP 代理不会改道。

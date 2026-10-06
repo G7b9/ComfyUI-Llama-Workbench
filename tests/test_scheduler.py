@@ -452,13 +452,15 @@ def test_remote_callers_have_distinct_authenticated_leases(monkeypatch):
     assert authorize(req) == "director-b"
 
 
-def test_http_routes_submit_query_cancel_and_enforce_auth(tmp_path, monkeypatch):
+@pytest.mark.parametrize("lifecycle_mode", ["false", "true"])
+def test_http_routes_submit_query_cancel_and_enforce_auth(tmp_path, monkeypatch, lifecycle_mode):
     import asyncio
     import sys
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
     import lwb.scheduler as module
 
+    monkeypatch.setenv("LWB_RESTRICT_LIFECYCLE", lifecycle_mode)
     monkeypatch.setenv("LWB_STATE_DIR", str(tmp_path / "state"))
     profiles = tmp_path / "profiles.json"
     profiles.write_text(json.dumps({"text": {"binary_path": "unused", "model_path": "unused"}}))

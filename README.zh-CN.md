@@ -217,6 +217,29 @@ Chat 会将思考轨迹放到 `thinking` 输出，只将最终答案放到 `assi
 恰好重试一次，以恢复最终答案；原始思考内容仍保留在 `thinking` 输出中。Chat Settings
 会在每次排队时重新构建，因此清空系统提示词会在下一次运行生效。
 
+## 原生 workflow 访问配置
+
+默认以 ComfyUI 自身的访问控制为原生 workflow 的边界。**所有能够提交 ComfyUI workflow
+的调用方，都可以使用 Start Server／Stop Server 节点**，包括从内网其他机器打开 ComfyUI
+网页的用户。沿用节点中的程序路径、模型路径、端口和启动参数，无需额外 Workbench token、
+无需修改现有 workflow，也无需迁移到 profile。`/prompt` 与 `/api/prompt` 行为一致。
+
+服务器环境变量 `LWB_RESTRICT_LIFECYCLE` 未设置时为 `false`。
+已有部署若需恢复旧版限制，请在 ComfyUI 的启动环境中设置：
+
+```sh
+export LWB_RESTRICT_LIFECYCLE=true
+```
+
+严格模式保留原有 loopback／Origin 检查；远程 Start／Stop 请求即使持有有效 Workbench
+凭据仍会被拒绝。配置 API token 后，严格模式的本机生命周期请求也需要凭据。
+支持 `true/false`、`1/0`、`yes/no`、`on/off`，忽略大小写与两端空白；空字符串或其他值
+会明确报启动配置错误。插件初始化时读取开关，workflow 输入、HTTP 请求体、请求头和查询
+参数均不能覆盖它。配置变更在下一次计划中的 ComfyUI 重启后生效。
+
+两种模式下，内部 `QueuedText` 节点都禁止直接提交，`/lwb/v1/*` 管理 API 的鉴权保持独立。
+进程归属检查、服务复用、执行租约和 GPU 调度规则不变。
+
 ## 服务器配置与显存管理
 
 如果文本推理和图像生成共用一块 GPU，请保持 Start Server 的

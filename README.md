@@ -260,6 +260,36 @@ answer; the original thought remains on the `thinking` output. Chat Settings
 are rebuilt on every queue, so clearing its system prompt takes effect on the
 next run.
 
+## Native workflow access
+
+By default, Workbench uses ComfyUI's own access control for native workflows.
+**Every caller allowed to submit a ComfyUI workflow can use Start Server and
+Stop Server**, including users opening the ComfyUI web UI from another LAN
+machine. Existing workflows keep their executable path, model path, port and
+launch arguments; no additional Workbench token or profile migration is required.
+This policy applies equally to `/prompt` and `/api/prompt`.
+
+The server-only environment variable `LWB_RESTRICT_LIFECYCLE` defaults to `false`.
+To restore the previous restrictive behavior on an existing deployment, set it
+in ComfyUI's startup environment:
+
+```sh
+export LWB_RESTRICT_LIFECYCLE=true
+```
+
+Strict mode preserves the previous loopback/Origin checks and rejects remote
+Start/Stop submissions even with a valid Workbench token. When API tokens are
+configured, strict mode also requires them for local lifecycle submissions.
+Accepted values are `true/false`, `1/0`, `yes/no`, and `on/off`, ignoring case and
+surrounding whitespace. Empty or other values produce a startup configuration
+error. The setting is read when the plugin initializes; workflow inputs,
+request bodies, headers and query parameters cannot override it. Apply changes
+at the next planned ComfyUI restart.
+
+In both modes, direct submission of the internal `QueuedText` node is forbidden,
+and authentication for `/lwb/v1/*` management APIs remains independent. Process
+ownership checks, model reuse, execution leases and GPU scheduling are unchanged.
+
 ## Server configuration and GPU memory
 
 When sharing a GPU between image generation and text inference, keep Start Server's
