@@ -535,18 +535,19 @@ class LlamaWorkbenchH3AutoResolutionSelector:
                         "default": 1.0,
                         "min": 0.1,
                         "max": 16.0,
-                        "step": 0.1,
-                        "tooltip": "Target total megapixels. 1.0 MP is about 1024×1024 for 1:1.",
+                        "step": 0.01,
+                        "round": 0.01,
+                        "tooltip": "Target megapixels (1024² pixels per MP). Supports 0.01 precision, e.g. 0.92 or 0.98.",
                     },
                 ),
                 "multiple": (
                     "INT",
                     {
-                        "default": 8,
+                        "default": 32,
                         "min": 8,
                         "max": 128,
                         "step": 4,
-                        "tooltip": "Round each output dimension to the nearest multiple, matching the H3 selector calculation.",
+                        "tooltip": "Round each output dimension to the nearest multiple. MiniMax-H3 recommends 32; smaller multiples may not satisfy Patchify alignment.",
                     },
                 ),
             }

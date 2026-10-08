@@ -240,13 +240,24 @@ diffusion-generation graph.
 ## Automatic image resolution
 
 **Llama Workbench H3 Auto Resolution Selector** accepts an `IMAGE`, a target
-`megapixels` value, and a rounding `multiple` (default 8). In its default
+`megapixels` value, and a rounding `multiple` (default 32). In its default
 `Auto (nearest input image)` mode it selects the closest supported aspect ratio:
 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, or 21:9. It calculates dimensions from
 the target pixel count, rounds them to the selected multiple, and outputs
 `width` and `height` for nodes such as
 Empty Latent Image. Select a listed ratio manually to override Auto; the image
 input remains useful as a visual reference for the graph.
+
+`megapixels` supports 0.01 precision, including 0.92 and 0.98, and keeps its
+default of 1.0. One MP here means 1024² pixels, not 1,000,000 pixels.
+For 16:9 with `multiple=32`, 0.92 produces **1312×736** and 0.98 produces
+the common H3 canvas **1344×768**. MiniMax-H3 recommends `multiple=32`;
+8 and 16 remain available for compatibility but may not satisfy Patchify
+alignment. Existing workflows retain their saved multiple values.
+Dimensions are rounded independently, so 32-pixel alignment does not guarantee
+an exact match to the selected aspect ratio. This node only calculates
+resolution; it does not repair unaligned latents inside MiniMax-H3 or its
+Patchify implementation.
 
 When Chat `thinking` is `on`, reasoning-capable servers may return the thought
 trace separately from the final answer. Chat now keeps that trace on its
