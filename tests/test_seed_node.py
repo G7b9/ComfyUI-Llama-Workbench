@@ -17,7 +17,7 @@ def test_seed_node_uses_native_comfyui_seed_controls():
     assert specification[1]["control_after_generate"] is True
 
 
-@pytest.mark.parametrize("seed", [0, 1, 42, SEED_MAX])
+@pytest.mark.parametrize("seed", [0, 1, 42, 228688391899128, SEED_MAX])
 def test_seed_node_returns_fixed_seed(seed):
     assert LlamaWorkbenchSeed().generate(seed) == (seed,)
 
@@ -48,3 +48,15 @@ def test_seed_frontend_adds_quick_controls_without_replacing_node_type():
     assert "control_after_generate" in source
     assert "globalThis.crypto.getRandomValues" in source
     assert "LiteGraph.registerNodeType" not in source
+    assert "const SEED_MAX = Number.MAX_SAFE_INTEGER" in source
+    assert "new Uint32Array(2)" in source
+    assert "seed === 0 ? SEED_MAX : seed - 1" in source
+
+
+def test_seed_range_preserves_json_precision():
+    import json
+
+    assert SEED_MAX == 9007199254740991
+    seed = 228688391899128
+    restored = json.loads(json.dumps({"seed": seed}))
+    assert LlamaWorkbenchSeed().generate(**restored) == (seed,)

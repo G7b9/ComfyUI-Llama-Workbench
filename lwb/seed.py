@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 
-SEED_MAX = 0x7FFFFFFF
+SEED_MAX = (1 << 53) - 1
 
 
 class LlamaWorkbenchSeed:
@@ -27,7 +27,7 @@ class LlamaWorkbenchSeed:
                         "min": 0,
                         "max": SEED_MAX,
                         "control_after_generate": True,
-                        "tooltip": "Use the node buttons or ComfyUI's native control to keep the seed fixed, randomize it, or increment/decrement it after generation.",
+                        "tooltip": "Seed range: 0–9007199254740991 (JavaScript safe integers). Use the node buttons or ComfyUI's native control to keep it fixed, randomize it, or increment/decrement it after generation. Downstream nodes may have smaller seed ranges.",
                     },
                 ),
             }

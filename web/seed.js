@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 
 const SEED_NODE = "LlamaWorkbench_Seed";
-const SEED_MAX = 0x7fffffff;
+const SEED_MAX = Number.MAX_SAFE_INTEGER;
 const SEED_MODES = new Set(["fixed", "increment", "decrement", "randomize"]);
 
 function findSeedWidget(node) {
@@ -54,9 +54,9 @@ function currentSeed(node) {
 
 function randomSeed() {
   if (globalThis.crypto?.getRandomValues) {
-    const value = new Uint32Array(1);
+    const value = new Uint32Array(2);
     globalThis.crypto.getRandomValues(value);
-    return value[0] & SEED_MAX;
+    return (value[0] & 0x1fffff) * 0x100000000 + value[1];
   }
   return Math.floor(Math.random() * (SEED_MAX + 1));
 }
@@ -104,7 +104,8 @@ function addSeedControls(node) {
     "- Decrement Each Run",
     "Decrement the displayed seed now and after every queued run.",
     () => {
-      setSeed(node, (currentSeed(node) - 1 + SEED_MAX + 1) % (SEED_MAX + 1));
+      const seed = currentSeed(node);
+      setSeed(node, seed === 0 ? SEED_MAX : seed - 1);
       setMode(node, "decrement");
     },
   );
