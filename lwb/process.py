@@ -41,6 +41,8 @@ class ServerLaunchConfig:
     def __post_init__(self) -> None:
         if not str(self.model_path).strip():
             raise ValueError("model_path is required")
+        if str(self.model_path).endswith(".ninfer"):
+            raise ValueError(".ninfer weights require a managed NInfer profile")
         if not 1 <= int(self.port) <= 65535:
             raise ValueError("port must be between 1 and 65535")
         if int(self.context_size) < 512:

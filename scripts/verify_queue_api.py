@@ -84,6 +84,7 @@ def main():
                     ],
                     "max_tokens": 256,
                     "temperature": 0,
+                    "chat_template_kwargs": {"enable_thinking": False},
                     "response_format": {"type": "json_object"},
                 },
             },

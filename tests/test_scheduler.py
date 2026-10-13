@@ -357,6 +357,7 @@ def test_model_metadata_token_budget_and_raw_passthrough(scheduler):
     assert info["n_ctx"] == 8192 and info["model_id"] == "actual-model"
     assert info["input_tokens"] == 3
     assert calls[-1][1]["response_format"] == payload["response_format"]
+    assert calls[0][1]["response_format"] == payload["response_format"]
     assert calls[-1][1]["chat_template_kwargs"] == payload["chat_template_kwargs"]
     assert response.json()["usage"]["prompt_tokens"] == 5
     calls.clear()

@@ -174,6 +174,9 @@ def _auto_unload_backend(backend: Any, enabled: Any) -> bool:
 
     if not bool(enabled):
         return False
+    release_managed = getattr(backend, "release_managed", None)
+    if callable(release_managed):
+        return release_managed()
     if isinstance(backend, EmbeddedBackend):
         released = EMBEDDED_MODELS.release(backend._active_backend or backend)
         print(f"[Llama Workbench] auto_unload embedded model: {'released' if released else 'not owned or already released'}.")
@@ -1405,7 +1408,7 @@ class LlamaWorkbenchChat:
             # one direct-answer retry with thinking disabled. This prevents a
             # populated Thinking panel and an empty Final answer panel while
             # avoiding an unbounded retry loop.
-            if not reply and thinking_text and thinking_mode == "on":
+            if not reply and thinking_text and thinking_mode == "on" and not getattr(backend, "strict_transport", False):
                 final_settings = dict(generation_settings)
                 final_settings["enable_thinking"] = False
                 reply, recovery_thinking = _chat_reply_and_thinking(backend, messages, **final_settings)
@@ -1424,7 +1427,7 @@ class LlamaWorkbenchChat:
                 if follow_up_thinking:
                     thinking_text = "\n\n".join(part for part in (thinking_text, follow_up_thinking) if part)
                 reply, model_state = parse_skill_state(reply)
-                if not reply and thinking_text and thinking_mode == "on":
+                if not reply and thinking_text and thinking_mode == "on" and not getattr(backend, "strict_transport", False):
                     final_settings = dict(generation_settings)
                     final_settings["enable_thinking"] = False
                     reply, recovery_thinking = _chat_reply_and_thinking(backend, messages, **final_settings)
@@ -1565,4 +1568,27 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
 # Queue job outputs contain only request identity/state; results use the authenticated API.
 NODE_CLASS_MAPPINGS["LlamaWorkbench_QueuedText"] = LlamaWorkbenchQueuedText
+
+
+class LlamaWorkbenchManagedProfile:
+    CATEGORY = "Llama Workbench / Backend"
+    RETURN_TYPES = ("LLAMA_WORKBENCH_BACKEND",)
+    FUNCTION = "connect"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        from .scheduler import SCHEDULER
+        profiles = list(SCHEDULER.profiles) if SCHEDULER else ["configure administrator profiles"]
+        return {"required": {"profile": (profiles,)}}
+
+    def connect(self, profile):
+        from .backend import ManagedProfileBackend
+        from .scheduler import SCHEDULER
+        if SCHEDULER is None or profile not in SCHEDULER.profiles:
+            raise ValueError("unknown administrator profile")
+        return (ManagedProfileBackend(SCHEDULER, profile),)
+
+
+NODE_CLASS_MAPPINGS["LlamaWorkbench_ManagedProfile"] = LlamaWorkbenchManagedProfile
+NODE_DISPLAY_NAME_MAPPINGS["LlamaWorkbench_ManagedProfile"] = "Llama Workbench Managed Profile"
 NODE_DISPLAY_NAME_MAPPINGS["LlamaWorkbench_QueuedText"] = "Llama Workbench Queued Text Request"

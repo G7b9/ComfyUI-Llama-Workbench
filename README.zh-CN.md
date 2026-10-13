@@ -326,3 +326,7 @@ Skill 状态解析。测试不需要 ComfyUI、模型或 GPU。
 让文本与图片任务共享显存调度，并获取持久请求 ID、结构化结果和定向取消能力。
 详见 [API 文档](docs/queue-api.md) 和可导入的 [Postman 集合](examples/api/queue-api.postman_collection.json)。
 文本推理需要通过此 API 提交，才能参与完整推理周期的 GPU 租约。
+
+## 受管 NInfer 与 turbo
+
+管理员 profile 可选择 NInfer Docker 或 llama.cpp，继续共用原生队列与 Chat/Skill 后端。新增 Managed Profile 节点无需把 `.ninfer` 填入 GGUF 启动节点。所有权、GPU 交接、视觉预算、导演台兼容与验收见[受管引擎文档](docs/managed-engines.md)。

@@ -92,6 +92,9 @@ class ServerBackend:
     owned_by_workbench: bool = False
     context_size: int = 0
     use_environment_proxy: bool = False
+    # Managed adapters submit once, preserving template/schema constraints.
+    strict_transport: bool = False
+    release_managed: Callable[[], bool] | None = field(default=None, repr=False, compare=False)
     # Start Server supplies a callback here. Keeping it optional means a
     # Connection node remains a plain OpenAI-compatible client, while an owned
     # server can expose the error that llama.cpp wrote to its own stderr/stdout.
@@ -187,6 +190,7 @@ class ServerBackend:
             "presence_penalty",
             "repeat_penalty",
             "seed",
+            "response_format",
         ):
             value = settings.get(key)
             if value is not None:
@@ -198,9 +202,14 @@ class ServerBackend:
         if enable_thinking is not None:
             # llama-server passes this to its Jinja chat template. Models that
             # do not define the variable simply retain their normal template.
-            body["chat_template_kwargs"] = {"enable_thinking": bool(enable_thinking)}
+            body["chat_template_kwargs"] = {
+                **settings.get("chat_template_kwargs", {}), "enable_thinking": bool(enable_thinking)
+            }
+        elif "chat_template_kwargs" in settings:
+            body["chat_template_kwargs"] = settings["chat_template_kwargs"]
 
-        endpoints = ("/v1/chat/completions", "/chat/completions")
+        endpoints = (("/v1/chat/completions",) if self.strict_transport
+                     else ("/v1/chat/completions", "/chat/completions"))
         errors: list[str] = []
         for endpoint in endpoints:
             # Older Windows builds and reverse-proxy wrappers can reject the
@@ -208,7 +217,7 @@ class ServerBackend:
             # unhelpful 5xx response. Retry once using only standard OpenAI
             # fields; this preserves normal thinking support on newer servers.
             attempts = [("requested payload", body)]
-            if "chat_template_kwargs" in body:
+            if "chat_template_kwargs" in body and not self.strict_transport:
                 compatibility_body = dict(body)
                 compatibility_body.pop("chat_template_kwargs", None)
                 attempts.append(("standard compatibility payload", compatibility_body))
@@ -275,6 +284,22 @@ class ServerBackend:
 
         completion = self.chat_response(messages, **settings)
         return completion.content or completion.reasoning
+
+
+class ManagedProfileBackend(ServerBackend):
+    """The existing Chat/Skill/PE socket with an administrator profile lifecycle."""
+    def __init__(self, scheduler, profile):
+        config = scheduler.profiles[profile]
+        host = f"[{config.host}]" if ":" in config.host else config.host
+        super().__init__(f"http://{host}:{config.port}", api_key_env=getattr(config, "api_key_env", ""),
+                         label="managed profile: " + profile, context_size=config.context_size,
+                         model_path=config.model_path, strict_transport=True,
+                         owned_by_workbench=True, release_managed=scheduler.release_workflow)
+        self.scheduler = scheduler
+        self.profile = profile
+
+    def chat_response(self, messages, **settings):
+        return self.scheduler.workflow_chat(self.profile, messages, settings)
 
 
 @dataclass(slots=True)

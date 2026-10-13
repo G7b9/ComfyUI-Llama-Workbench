@@ -568,3 +568,12 @@ def test_qwen_pe_canvas_uses_ratio_budget_when_not_following_input_size():
     assert spec.width % 32 == spec.height % 32 == 0
     assert spec.width * spec.height == pytest.approx(1024 * 1024, rel=0.04)
     assert spec.ratio_source == "ratio_follow:<image2>:aspect_only"
+
+@pytest.mark.parametrize('response', [ChatResponse(content='bad'), ChatResponse(content='{}', finish_reason='length')])
+def test_managed_prompt_enhancer_preserves_single_attempt(response):
+    backend = SequenceBackend(response)
+    backend.strict_transport = True
+    with pytest.raises(PromptRewriteFormatError, match='without replay'):
+        rewrite_prompt(backend, 'corgi', system_prompt='user supplied')
+    assert len(backend.calls) == 1
+    assert backend.calls[0][1]['enable_thinking'] is True

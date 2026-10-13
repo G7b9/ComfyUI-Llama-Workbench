@@ -774,7 +774,8 @@ def rewrite_prompt(
     all_thinking: list[str] = []
     failures: list[str] = []
 
-    for attempt in range(2):
+    attempts = 1 if getattr(backend, "strict_transport", False) else 2
+    for attempt in range(attempts):
         attempt_settings = dict(settings)
         if attempt:
             attempt_settings["enable_thinking"] = False
@@ -809,10 +810,12 @@ def rewrite_prompt(
                     flush=True,
                 )
             failures.append(str(failure))
-            if attempt == 1:
+            if attempt == attempts - 1:
                 details = "; retry: ".join(failures)
                 raise PromptRewriteFormatError(
-                    "Qwen Prompt Enhancer failed structured output after one retry: " + details
+                    "Qwen Prompt Enhancer failed structured output"
+                    + (" without replay: " if attempts == 1 else " after one retry: ")
+                    + details
                 ) from failure
             if profile.takes_images:
                 expected = (

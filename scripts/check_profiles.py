@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from lwb.process import OwnedServer, _resolve_binary  # noqa: E402
 from lwb.scheduler import load_profiles  # noqa: E402
+from lwb.engines import NInferProfile, digest_file  # noqa: E402
 
 
 def main():
@@ -28,6 +29,10 @@ def main():
         profiles = load_profiles()
         for profile in profiles.values():
             if args.check_build:
+                if isinstance(profile, NInferProfile):
+                    if digest_file(Path(profile.runtime_directory) / "ninfer-serve") != profile.binary_sha256:
+                        raise ValueError("NInfer binary hash differs")
+                    continue
                 binary = _resolve_binary(profile.binary_path)
                 OwnedServer()._command_for(binary, profile)
                 OwnedServer._probe(binary)
@@ -42,8 +47,10 @@ def main():
                 "profiles": {
                     name: {
                         "context_size": p.context_size,
-                        "gpu_layers": p.gpu_layers,
-                        "mmproj_enabled": bool(p.mmproj_path),
+                        "engine": p.engine,
+                        "gpu_layers": getattr(p, "gpu_layers", None),
+                        "mmproj_enabled": bool(getattr(p, "mmproj_path", "")),
+                        "embedded_vision": isinstance(p, NInferProfile),
                         "startup_timeout_seconds": p.startup_timeout_seconds,
                     }
                     for name, p in profiles.items()

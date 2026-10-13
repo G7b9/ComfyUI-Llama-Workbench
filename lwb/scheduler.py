@@ -6,7 +6,7 @@ provides FIFO arbitration with image graphs for the entire inference lifetime.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 import hashlib
 import heapq
 import ipaddress
@@ -24,7 +24,8 @@ import uuid
 
 import requests
 
-from .process import OWNED_SERVER, ServerLaunchConfig, ServerStartupTimeout
+from .process import OWNED_SERVER, ServerLaunchConfig, ServerLaunchError, ServerStartupTimeout
+from .engines import EngineManager, ExecutionGate, NInferProfile, container_dead, fingerprint, gpu_clear
 
 NODE = "LlamaWorkbench_QueuedText"
 TERMINAL = {"completed", "failed", "cancelled", "result_unknown"}
@@ -53,6 +54,17 @@ def canonical(value):
     return json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
     )
+
+
+def profile_digest_config(config):
+    """Keep the pre-engine llama profile identity for newly-added inert defaults."""
+    value = asdict(config)
+    if value.get("engine", "llama.cpp") == "llama.cpp":
+        for field, default in {"engine": "llama.cpp", "switch_lock": "", "model_sha256": "",
+                "binary_sha256": "", "mmproj_sha256": "", "api_key_env": "", "model_alias": ""}.items():
+            if value.get(field) == default:
+                value.pop(field, None)
+    return value
 
 
 def validate_payload(payload):
@@ -148,9 +160,28 @@ class ManagedServerProfile(ServerLaunchConfig):
     """Administrator-only scheduling policy; never read from an HTTP payload."""
 
     startup_timeout_seconds: float = 600.0
+    engine: str = "llama.cpp"
+    switch_lock: str = ""
+    model_sha256: str = ""
+    binary_sha256: str = ""
+    mmproj_sha256: str = ""
+    api_key_env: str = ""
+    model_alias: str = ""
 
     def __post_init__(self):
         ServerLaunchConfig.__post_init__(self)
+        if self.engine != "llama.cpp":
+            raise ValueError("llama.cpp profile engine must be llama.cpp")
+        if self.model_alias and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", self.model_alias):
+            raise ValueError("model_alias must be a bounded identifier")
+        if self.model_path.endswith(".ninfer"):
+            raise ValueError(".ninfer weights require engine=ninfer, not the GGUF launcher")
+        if self.switch_lock and not Path(self.switch_lock).is_absolute():
+            raise ValueError("switch_lock must be absolute")
+        for name in ("model_sha256", "binary_sha256", "mmproj_sha256"):
+            value = getattr(self, name)
+            if value and not re.fullmatch(r"[a-f0-9]{64}", value):
+                raise ValueError(f"{name} must be SHA256")
         value = self.startup_timeout_seconds
         if type(value) not in (int, float) or not math.isfinite(value) or not 1 <= value <= 1800:
             raise ValueError("startup_timeout_seconds must be a finite number in [1, 1800]")
@@ -178,6 +209,11 @@ def load_profiles():
     from .process import _parse_extra_args
 
     for name, value in raw.items():
+        if not isinstance(value, dict):
+            raise ValueError("profile must be an object")
+        if value.get("engine") == "ninfer":
+            profiles[name] = NInferProfile(**value)
+            continue
         config = ManagedServerProfile(**value)
         if config.host not in {"127.0.0.1", "::1", "localhost"}:
             raise ValueError("managed llama-server profiles must bind loopback")
@@ -215,6 +251,9 @@ def load_profiles():
             ):
                 raise ValueError("--spec-draft-n-max must be an integer in [1, 64]")
         profiles[name] = config
+    locks = {p.switch_lock for p in profiles.values() if p.switch_lock}
+    if len(locks) > 1:
+        raise ValueError("All engines must share one switch_lock")
     return profiles
 
 
@@ -237,6 +276,8 @@ def process_identity(pid):
 def definitely_dead(identity):
     if not identity:
         return False
+    if identity.get("kind") == "docker":
+        return container_dead(identity)
     boot = boot_id()
     if boot != "unknown" and identity.get("boot_id") != boot:
         return True
@@ -284,13 +325,13 @@ class Journal:
             )
             return record
 
-    def create(self, request_id, owner, digest):
+    def create(self, request_id, owner, digest, compatible_digests=()):
         with self.lock, self.db:
             row = self.db.execute(
                 "SELECT owner,digest,record FROM requests WHERE id=?", (request_id,)
             ).fetchone()
             if row:
-                if row[0] != owner or row[1] != digest:
+                if row[0] != owner or row[1] not in {digest, *compatible_digests}:
                     raise ValueError("request_id already exists with different owner or payload")
                 return json.loads(row[2]), False
             record = dict(
@@ -338,9 +379,14 @@ class Scheduler:
         self.journal = journal
         self.profiles = profiles
         self.server = server
+        self.engine = EngineManager(server)
         self.release_models = release_models or (lambda: None)
         self.idle_seconds = idle_seconds
-        self.gpu = threading.RLock()
+        locks = {getattr(p, "switch_lock", "") for p in profiles.values()} - {""}
+        if len(locks) > 1:
+            raise ValueError("profiles must share one GPU switch_lock")
+        self.gpu = ExecutionGate(next(iter(locks), None))
+        self.engine.coordinate_gpu = bool(locks)
         self.lock = threading.RLock()
         self.payloads = {}
         self.queue = None
@@ -354,13 +400,21 @@ class Scheduler:
         with self.gpu:
             lease = self.journal.meta("lease")
             if self.lease_owner:
-                self.server.status()  # poll/reap an exited child before reading /proc
+                try:
+                    self.engine.status()  # reap child; Docker uses daemon identity instead
+                except ServerLaunchError:
+                    # A removed container can be proven absent below. An unavailable
+                    # daemon cannot: definitely_dead stays false in that case.
+                    pass
             if self.blocked and lease and definitely_dead(lease.get("identity")):
                 if self.lease_owner:
-                    self.server.acknowledge_dead(self.lease_owner)
+                    self.engine.acknowledge_dead(self.lease_owner)
                     self.lease_owner = None
                 self.journal.meta("lease", None)
                 self.blocked = False
+                self.gpu.unpin()
+            elif self.blocked:
+                self.gpu.pin()
             return {"blocked": self.blocked, "lease": self.journal.meta("lease")}
 
     def submit(self, owner, profile, payload, request_id=None):
@@ -371,10 +425,13 @@ class Scheduler:
         if not isinstance(rid, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", rid):
             raise ValueError("invalid request_id")
         digest = hashlib.sha256(
+            canonical([profile, profile_digest_config(self.profiles[profile]), payload]).encode()
+        ).hexdigest()
+        full_digest = hashlib.sha256(
             canonical([profile, asdict(self.profiles[profile]), payload]).encode()
         ).hexdigest()
         with self.lock:
-            record, created = self.journal.create(rid, owner, digest)
+            record, created = self.journal.create(rid, owner, digest, (full_digest,))
             if not created:
                 return record
             if self.blocked:
@@ -420,9 +477,14 @@ class Scheduler:
                 "GPU lease quarantined: reconcile the unknown request before any model load"
             )
         if self.lease_owner:
-            self.server.stop(lease_owner=self.lease_owner)
+            try:
+                self.engine.stop(lease_owner=self.lease_owner)
+            except Exception:
+                self.blocked = True
+                raise
             self.lease_owner = None
             self.journal.meta("lease", None)
+            self.gpu.unpin()
 
     def before_graph(self, prompt):
         if self.blocked:
@@ -434,6 +496,17 @@ class Scheduler:
             raise RuntimeError("Managed text jobs must be standalone queue items")
         if not has_job:
             self.release()
+            if self.gpu.filename:
+                # Old Connection remains usable for pure client graphs. It never
+                # authorizes loading an image model beside an external occupant.
+                client_nodes = {
+                    "LlamaWorkbench_Connection", "LlamaWorkbench_Chat", "LlamaWorkbench_ChatSettings",
+                    "LlamaWorkbench_ChatDisplay", "LlamaWorkbench_Prompt", "LlamaWorkbench_SkillLoader",
+                    "LlamaWorkbench_ManagedProfile", "LlamaWorkbench_Seed", "LoadImage",
+                }
+                if any(n.get("class_type") not in client_nodes for n in prompt.values()):
+                    self.release_models()
+                    gpu_clear()
 
     def install_queue_fairness(self):
         original_put = self.queue.put
@@ -478,6 +551,8 @@ class Scheduler:
 
     def idle_release(self):
         # Called by a daemon; never stop an in-flight job or unknown execution.
+        if not self.lease_owner or self.blocked:
+            return
         if not self.gpu.acquire(blocking=False):
             return
         try:
@@ -502,6 +577,18 @@ class Scheduler:
         return response.json()
 
     def infer(self, backend, payload, on_preflight=lambda info: None):
+        info = self.preflight(backend, payload)
+        on_preflight(info)
+        body = {k: v for k, v in payload.items() if k != "input_tokens"}
+        body.update(model=info["model_id"], stream=False)
+        # One submission, one endpoint, no compatibility retry under any error.
+        response = backend._session.post(
+            backend.server_url + "/v1/chat/completions", json=body,
+            timeout=backend.timeout_seconds
+        )
+        return response, info
+
+    def preflight(self, backend, payload, multimodal=False):
         session = backend._session  # trust_env=False, including SOCKS proxies
         base = backend.server_url
         models = self._json(session, base, "/v1/models")
@@ -510,23 +597,36 @@ class Scheduler:
         actual_ctx = props.get("default_generation_settings", {}).get("n_ctx")
         if type(actual_ctx) is not int or actual_ctx <= 0:
             raise ValueError("server did not disclose actual n_ctx")
-        if actual_ctx < backend.context_size:
+        if actual_ctx != backend.context_size:
             raise ValueError(
-                f"actual n_ctx={actual_ctx} is smaller than requested {backend.context_size}; refusing fallback"
+                f"actual n_ctx={actual_ctx} differs from requested {backend.context_size}; refusing fallback"
             )
         template_body = {"messages": payload["messages"]}
         if "chat_template_kwargs" in payload:
             template_body["chat_template_kwargs"] = payload["chat_template_kwargs"]
-        rendered = self._json(session, base, "/apply-template", template_body)
-        tokens = self._json(
-            session,
-            base,
-            "/tokenize",
-            {"content": rendered["prompt"], "add_special": True, "parse_special": True},
-        )["tokens"]
-        if not isinstance(tokens, list) or any(type(token) is not int for token in tokens):
-            raise ValueError("server returned an invalid token array")
-        count = len(tokens)
+        if "response_format" in payload:
+            # Some engines render the schema into the actual generation prompt.
+            template_body["response_format"] = payload["response_format"]
+        if multimodal:
+            from .multimodal import ninfer_count_body
+            if props.get("backend") != "ninfer" or not props.get("modalities", {}).get("vision"):
+                raise ValueError("Managed visual budget requires probed NInfer vision/count endpoint; use external Connection for unmeasured engines")
+            body = ninfer_count_body(payload)
+            body["model"] = model_id
+            count = self._json(session, base, "/v1/responses/input_tokens", body)["input_tokens"]
+            if type(count) is not int or count <= 0:
+                raise ValueError("invalid multimodal token count")
+            method = "NInfer responses/input_tokens (text + decoded media)"
+        else:
+            rendered = self._json(session, base, "/apply-template", template_body)
+            tokens = self._json(
+                session, base, "/tokenize",
+                {"content": rendered["prompt"], "add_special": True, "parse_special": True},
+            )["tokens"]
+            if not isinstance(tokens, list) or any(type(token) is not int for token in tokens):
+                raise ValueError("server returned an invalid token array")
+            count = len(tokens)
+            method = "apply-template + tokenize"
         if "input_tokens" in payload and payload["input_tokens"] != count:
             raise ValueError(f"input_tokens assertion mismatch: server counted {count}")
         if count + payload["max_tokens"] > actual_ctx:
@@ -537,16 +637,86 @@ class Scheduler:
             "model_id": model_id,
             "n_ctx": actual_ctx,
             "input_tokens": count,
-            "token_counting": {"available": True, "method": "apply-template + tokenize"},
+            "token_counting": {"available": True, "method": method},
         }
-        on_preflight(info)
-        body = {k: v for k, v in payload.items() if k != "input_tokens"}
-        body.update(model=model_id, stream=False)
-        # One submission, one endpoint, no compatibility retry under any error.
-        response = session.post(
-            base + "/v1/chat/completions", json=body, timeout=backend.timeout_seconds
-        )
-        return response, info
+        return info
+
+    def release_workflow(self):
+        with self.gpu:
+            if self.lease_owner != "workflow":
+                return False
+            self.release()
+            return True
+
+    def workflow_chat(self, profile, messages, settings):
+        """A native Chat graph uses the same gate, instance and unknown-outcome policy."""
+        from .backend import BackendError, _chat_response_from_choice
+        from .multimodal import has_media
+        config = self.engine.prepare(self.profiles[profile])
+        with self.gpu:
+            if self.blocked:
+                raise RuntimeError("GPU lease quarantined")
+            if self.lease_owner and (self.lease_owner != "workflow"
+                                     or not self.engine.is_running_for(config)):
+                self.release()
+            if not self.engine.is_running_for(config):
+                self.release_models()
+            self.lease_owner = "workflow"
+            self.gpu.pin()
+            self.journal.meta("lease", {"owner": "workflow", "identity":
+                self.engine.identity(process_identity, boot_id)
+                if self.engine.is_running_for(config) else {"boot_id": boot_id()}})
+
+            def identity(value):
+                self.journal.meta("lease", {"owner": "workflow", "identity": value})
+
+            active = False
+            submitted = False
+            try:
+                backend = self.engine.start(config, wait_seconds=config.startup_timeout_seconds,
+                    timeout_seconds=3600, lease_owner="workflow", retain_on_timeout=True,
+                    validate_custom_options=True, on_identity=identity,
+                    on_spawn=lambda pid: identity(process_identity(pid) or {"pid": pid, "boot_id": boot_id()}))
+                identity(self.engine.identity(process_identity, boot_id))
+                body = {k: v for k, v in settings.items() if k in {
+                    "temperature", "max_tokens", "top_p", "top_k", "min_p", "presence_penalty",
+                    "repeat_penalty", "seed", "response_format", "chat_template_kwargs"}}
+                body["messages"] = messages
+                if type(body.get("max_tokens")) is not int or body["max_tokens"] <= 0:
+                    raise ValueError("Managed Chat requires explicit positive max_tokens")
+                if settings.get("enable_thinking") is not None:
+                    body["chat_template_kwargs"] = {**body.get("chat_template_kwargs", {}),
+                        "enable_thinking": bool(settings["enable_thinking"])}
+                self.engine.begin_request("workflow")
+                active = True
+                info = self.preflight(backend, body, multimodal=has_media(messages))
+                info.update(self.engine.snapshot(profile, self.engine.identity(process_identity, boot_id)))
+                self.journal.meta("model", info)
+                body.update(model=info["model_id"], stream=False)
+                submitted = True
+                r = backend._session.post(backend.server_url + "/v1/chat/completions", json=body,
+                                          timeout=backend.timeout_seconds)
+                if not r.ok:
+                    raise BackendError(f"Managed chat HTTP {r.status_code}: {r.text[:800]}")
+                data = r.json()
+                if not isinstance(data, dict) or not data.get("choices"):
+                    raise BackendError("Invalid managed chat response")
+                return _chat_response_from_choice(data["choices"][0])
+            except (requests.RequestException, ServerStartupTimeout):
+                self.blocked = True
+                raise
+            except (ValueError, TypeError) as exc:
+                if submitted:
+                    self.blocked = True
+                raise BackendError(str(exc)) from exc
+            finally:
+                if active and not self.blocked:
+                    self.engine.end_request("workflow")
+                elif not active and not self.blocked and self.engine.no_instance_created():
+                    self.lease_owner = None
+                    self.journal.meta("lease", None)
+                    self.gpu.unpin()
+                self.last_used = time.monotonic()
 
     def run(self, rid):
         with self.gpu:
@@ -564,21 +734,19 @@ class Scheduler:
                 if self.blocked:
                     raise RuntimeError("GPU lease quarantined")
                 original_config = self.profiles[profile]
-                config = replace(
-                    original_config,
-                    extra_args=original_config.extra_args + " --no-context-shift --parallel 1",
-                )
+                config = self.engine.prepare(original_config)
                 if self.lease_owner and (
-                    self.lease_owner != lease_owner or not self.server.is_running_for(config)
+                    self.lease_owner != lease_owner or not self.engine.is_running_for(config)
                 ):
                     self.release()
-                if not self.server.is_running_for(config):
+                if not self.engine.is_running_for(config):
                     self.release_models()
                 self.lease_owner = lease_owner
+                self.gpu.pin()
                 # Write BEFORE spawn: a crash in the spawn window is quarantined.
                 prior_identity = (
-                    process_identity(self.server.status()["pid"])
-                    if self.server.is_running_for(config)
+                    self.engine.identity(process_identity, boot_id)
+                    if self.engine.is_running_for(config)
                     else None
                 )
                 self.journal.meta(
@@ -601,9 +769,15 @@ class Scheduler:
                         },
                     )
 
+                def identified(identity):
+                    self.journal.update(rid, instance=identity, pid=identity.get("pid"))
+                    self.journal.meta("lease", {
+                        "owner": owner, "request_id": rid, "identity": identity,
+                    })
+
                 budget = gpu_budget()
                 self.journal.update(rid, gpu_budget=budget)
-                backend = self.server.start(
+                backend = self.engine.start(
                     config,
                     wait_seconds=getattr(original_config, "startup_timeout_seconds", 600),
                     retain_on_timeout=True,
@@ -611,25 +785,29 @@ class Scheduler:
                     timeout_seconds=3600,
                     lease_owner=lease_owner,
                     on_spawn=spawned,
+                    on_identity=identified,
                 )
-                pid = self.server.status()["pid"]
+                pid = self.engine.status()["pid"]
+                identity = self.engine.identity(process_identity, boot_id)
                 self.journal.meta(
                     "lease",
                     {
                         "owner": owner,
                         "request_id": rid,
-                        "identity": process_identity(pid) or {"pid": pid, "boot_id": boot_id()},
+                        "identity": identity,
                     },
                 )
                 if self.journal.get(rid)["cancel_requested"]:
                     raise CancelledBeforeInference()
-                self.server.begin_request(lease_owner)
+                self.engine.begin_request(lease_owner)
                 active = True
-                self.journal.update(rid, state="running", pid=pid)
+                snapshot = self.engine.snapshot(profile, identity)
+                self.journal.update(rid, state="running", pid=pid, runtime=snapshot)
 
                 def preflight(info):
                     if self.journal.get(rid)["cancel_requested"]:
                         raise CancelledBeforeInference()
+                    info.update(snapshot)
                     self.journal.update(rid, model=info)
                     self.journal.meta("model", info)
 
@@ -686,12 +864,16 @@ class Scheduler:
                 )
             except Exception as exc:
                 # Failures before HTTP generation have no uncertain inference.
+                if not active and not self.blocked and self.engine.no_instance_created():
+                    self.lease_owner = None
+                    self.journal.meta("lease", None)
+                    self.gpu.unpin()
                 return self.journal.update(
                     rid, state="failed", error={"kind": type(exc).__name__, "message": str(exc)}
                 )
             finally:
                 if active and not self.blocked:
-                    self.server.end_request(lease_owner)
+                    self.engine.end_request(lease_owner)
                 self.last_used = time.monotonic()
 
 
@@ -780,42 +962,42 @@ def guard_executor(scheduler, original):
         jobs = [n for n in prompt.values() if n.get("class_type") == NODE]
         if len(jobs) == 1:
             rid = jobs[0].get("inputs", {}).get("request_id")
-        with scheduler.gpu:
-            try:
+        try:
+            with scheduler.gpu:
                 scheduler.before_graph(prompt)
                 return original(executor, prompt, *args, **kwargs)
-            except Exception:
-                # A native prompt worker may not catch exceptions from execute.
-                # Report a failed graph without killing the worker or leaking data.
-                executor.success = False
-                executor.history_result = {"outputs": {}}
-                executor.status_messages = [
-                    (
-                        "execution_error",
-                        {
-                            "prompt_id": args[0] if args else kwargs.get("prompt_id"),
-                            "exception_message": "LWB guarded execution failed or GPU lease quarantined",
-                            "exception_type": "GPUExecutionBlocked",
-                        },
-                    )
-                ]
-                return None
-            finally:
-                if rid:
-                    try:
-                        record = scheduler.journal.get(rid)
-                        if record["state"] == "queued":
-                            scheduler.payloads.pop(rid, None)
-                            scheduler.journal.update(
-                                rid, state="failed", error={"kind": "node_not_executed"}
-                            )
-                        elif record["state"] in {"starting", "running"}:
-                            scheduler.blocked = bool(scheduler.journal.meta("lease"))
-                            scheduler.journal.update(
-                                rid, state="result_unknown", error={"kind": "node_execution_lost"}
-                            )
-                    except KeyError:
-                        pass
+        except Exception:
+            # A native prompt worker may not catch exceptions from execute.
+            # Report a failed graph without killing the worker or leaking data.
+            executor.success = False
+            executor.history_result = {"outputs": {}}
+            executor.status_messages = [
+                (
+                    "execution_error",
+                    {
+                        "prompt_id": args[0] if args else kwargs.get("prompt_id"),
+                        "exception_message": "LWB guarded execution failed or GPU lease quarantined",
+                        "exception_type": "GPUExecutionBlocked",
+                    },
+                )
+            ]
+            return None
+        finally:
+            if rid:
+                try:
+                    record = scheduler.journal.get(rid)
+                    if record["state"] == "queued":
+                        scheduler.payloads.pop(rid, None)
+                        scheduler.journal.update(
+                            rid, state="failed", error={"kind": "node_not_executed"}
+                        )
+                    elif record["state"] in {"starting", "running"}:
+                        scheduler.blocked = bool(scheduler.journal.meta("lease"))
+                        scheduler.journal.update(
+                            rid, state="result_unknown", error={"kind": "node_execution_lost"}
+                        )
+                except KeyError:
+                    pass
 
     guarded._lwb_guard = True
     return guarded
@@ -843,7 +1025,8 @@ def create_lifecycle_middleware():
         if request.method == "POST" and request.path in {"/prompt", "/api/prompt"}:
             body = await request.json()
             prompt = body.get("prompt", {})
-            sensitive_nodes = {"LlamaWorkbench_StartServer", "LlamaWorkbench_StopServer"}
+            sensitive_nodes = {"LlamaWorkbench_StartServer", "LlamaWorkbench_StopServer",
+                               "LlamaWorkbench_ManagedProfile"}
             if isinstance(prompt, dict) and any(
                 isinstance(n, dict) and n.get("class_type") == NODE for n in prompt.values()
             ):
@@ -934,6 +1117,12 @@ def install():
                 return web.json_response(
                     {
                         "profiles": list(SCHEDULER.profiles),
+                        "profile_details": {name: {
+                            "engine": getattr(config, "engine", "llama.cpp"),
+                            "logical_context": config.context_size,
+                            "config_fingerprint": fingerprint(EngineManager.prepare(config)),
+                            "measurement_source": "administrator_configuration",
+                        } for name, config in SCHEDULER.profiles.items()},
                         "worker_pid": os.getpid(),
                         "model": SCHEDULER.journal.meta("model"),
                         "gpu": {"blocked": SCHEDULER.blocked},

@@ -16,3 +16,8 @@ Thumbs.db
 *.ckpt
 *.pt
 *.bin
+
+# Private deployment profiles, workflows and real acceptance evidence
+.local/
+.local
+*.ninfer

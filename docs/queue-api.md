@@ -9,12 +9,14 @@
 
 文本请求作为一个独立 `LlamaWorkbench_QueuedText` 输出节点进入**同一个原生队列**，
 完整启动、预检、HTTP 推理和结果持久化均占用原生 worker。执行器入口还有 GPU 互斥；
-任何普通图片图执行前必须先停止本调度器的空闲 llama 子进程。禁止把该内部节点混入
+任何普通图片图执行前必须先释放本调度器的空闲受管引擎实例并核实显存交接。禁止把该内部节点混入
 图片图；该节点只引用请求 ID，不接收提示词或生命周期参数。
 
-进程所有权由当前 `OwnedServer` 的确切 `Popen` 对象证明；调用方租约由认证身份标记。
+llama.cpp 进程所有权由当前 `OwnedServer` 的确切 `Popen` 对象证明；NInfer 使用
+完整容器 ID、镜像、实际配置及运行世代核验。调用方租约由认证身份标记。
 只有匹配租约且没有执行中的请求才允许停止或切换。不会扫描、接管或按名称/端口终止
-外部服务。遇到外部服务占用端口直接报错。旧 `cleanup_previous_server` 输入保留但不再
+外部服务；NInfer 仅接受管理员针对确切完整容器 ID 的显式接管配置。遇到未经授权
+外部服务占用端口直接报错。旧 `cleanup_previous_server` 输入保留但不再
 执行任何扫描清理。Start/Stop/Status 的 `IS_CHANGED` 均返回 NaN，兼容输入签名缓存。
 
 旧 Connection、Chat、Prompt、Embedded 节点和工作流格式保留。旧式直连外部服务器、
@@ -250,3 +252,7 @@ GPU 监控观察。不要把此脚本的模拟/单元测试通过当作实机 CU
 
 确认路由及 profile 可用后，将客户端文本推理迁移到 requests API，并执行真实
 文本→文本→图片→文本验收；图片继续使用原生 `/prompt`。
+
+## 多引擎扩展
+
+`engine` 默认 `llama.cpp`，新增 `ninfer` 可信管理员配置与 Managed Profile 后端节点。两种引擎继续共用上述队列、幂等、drain 取消及未知结果隔离语义。Docker 恢复依据确切容器和实际状态，不套用宿主 Popen 死亡判据；预检渲染同时透传 response_format，计入引擎添加的 schema 提示。配置、共享启动器锁、视觉 Chat 预算与兼容限制见[受管引擎文档](managed-engines.md)。

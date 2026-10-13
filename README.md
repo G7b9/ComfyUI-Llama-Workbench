@@ -406,3 +406,7 @@ requests have persistent IDs, structured results, and targeted cancellation.
 See [API documentation](docs/queue-api.md) and the importable
 [Postman collection](examples/api/queue-api.postman_collection.json).
 Submit text through this API to participate in the GPU lease.
+
+## Managed NInfer and turbo profiles
+
+Administrator profiles can select NInfer Docker or llama.cpp while keeping the native queue and existing Chat/Skill backend. See [managed engines and acceptance](docs/managed-engines.md) for ownership, GPU handoff, multimodal budget, director compatibility and deployment examples.
