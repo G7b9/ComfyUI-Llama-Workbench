@@ -790,3 +790,33 @@ def test_startup_timeout_retains_lease_and_never_retries(scheduler):
     with pytest.raises(RuntimeError, match="quarantined"):
         scheduler.before_graph({"1": {"class_type": "KSampler"}})
     assert len(calls) == 1
+
+
+def test_original_schema_failure_keeps_raw_result_and_releases_active_request(scheduler):
+    from lwb.structured import digest
+    schema = {"type": "object", "propertyNames": {"enum": ["first", "last"]},
+              "additionalProperties": {"type": "string"}}
+    payload = dict(PAYLOAD, response_format={"type": "json_schema", "json_schema": {
+        "name": "keys", "schema": schema}})
+    before = digest(payload)
+    scheduler.submit("owner", "text", payload, "invalid-structured")
+    result = scheduler.run("invalid-structured")
+    assert digest(payload) == before
+    assert result["state"] == "failed"
+    assert result["error"]["stage"] == "output_validation"
+    assert result["error"]["keyword"] == "enum"
+    assert result["response"] == Response().json()
+    assert scheduler.server.active == 0 and not scheduler.blocked
+    assert scheduler.submit("owner", "text", payload, "invalid-structured")["state"] == "failed"
+    assert scheduler.run("invalid-structured")["state"] == "failed"
+
+
+def test_empty_capability_config_preserves_legacy_digest():
+    from dataclasses import asdict
+    from lwb.scheduler import ManagedServerProfile, profile_digest_config
+    profile = ManagedServerProfile("binary", "model")
+    legacy = asdict(profile)
+    for field in ("engine", "switch_lock", "model_sha256", "binary_sha256", "mmproj_sha256",
+                  "api_key_env", "model_alias", "structured_output_keywords"):
+        legacy.pop(field)
+    assert profile_digest_config(profile) == legacy

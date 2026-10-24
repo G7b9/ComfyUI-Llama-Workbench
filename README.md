@@ -410,3 +410,10 @@ Submit text through this API to participate in the GPU lease.
 ## Managed NInfer and turbo profiles
 
 Administrator profiles can select NInfer Docker or llama.cpp while keeping the native queue and existing Chat/Skill backend. See [managed engines and acceptance](docs/managed-engines.md) for ownership, GPU handoff, multimodal budget, director compatibility and deployment examples.
+
+## Structured output compatibility
+
+The managed queue and Managed Profile support equivalent finite-key schema
+conversion and validate final outputs against the original schema. See
+[structured output compatibility](docs/structured-output.md) for capability
+policies, explicit post-validation mode, diagnostics and migration.

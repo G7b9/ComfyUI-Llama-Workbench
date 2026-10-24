@@ -125,7 +125,8 @@ curl --noproxy '*' http://127.0.0.1:8188/lwb/v1/requests \
 - `temperature`：有限数值 0–2。
 - `max_tokens`：必填正整数；不接受无限输出或隐式小上下文。
 - `chat_template_kwargs`：JSON 对象，完整透传，无“兼容重试”删参。
-- `response_format`：`text`、`json_object` 或标准 `json_schema` 包装；先验证 JSON Schema，再由实际 llama 构建验证支持的约束。服务端拒绝的格式原样报错，不降为文本。
+- `response_format`：`text`、`json_object` 或标准 `json_schema` 包装；验证原始 schema、构造独立的后端生成 schema，并以原始 schema 校验最终内容。默认进行边界明确的等价转换，未确认的约束明确拒绝，不降为文本。
+- `structured_output_mode`：仅配合 `json_schema`，默认 `enforce`；显式 `post_validate` 仅约束生成 JSON 语法，最终仍须通过原始 schema。`strict` 原样透传。能力配置、支持范围和错误字段见[结构化输出说明](structured-output.md)。
 - `input_tokens`：可选非负整数**断言**，须等于本次模板渲染后的服务端计数；不作为未经验证的预算依据，也不传作未知 llama 参数。
 
 启动后通过 `/v1/models` 和 `/props` 获取真实 model id 与每 slot 的实际 `n_ctx`。
@@ -162,7 +163,7 @@ curl --noproxy '*' http://127.0.0.1:8188/lwb/v1/requests \
 
 `response` 保存完整解析后的原始 JSON，包括服务端附加字段；结构化 content 仍保留原有字符串，
 不变成仅供显示的文字。HTTP 错误保存 `error.status` 和原始 `error.body`，不进行第二次生成请求。
-`finish_reason: length` 不伪装成完整回答；调用方可据此拒绝被截断的输出。
+结构化响应的 `finish_reason: length` 或原始 schema 校验失败会记为 `failed`，保留 `response`，不会重试；普通文本仍保留原有 finish reason 行为。
 
 ## 状态、取消与恢复
 

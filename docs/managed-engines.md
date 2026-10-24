@@ -87,7 +87,7 @@ profiles inheriting a mixed group's lock, alongside the GPU preflight.
 
 Text preflight reads `/v1/models` and `/props`, verifies the exact configured
 context, renders `/apply-template` with **both** original template kwargs and
-`response_format`, and counts `/tokenize`. NInfer injects structured schema text
+`response_format` after shared equivalent schema conversion, and counts `/tokenize`. NInfer injects structured schema text
 into its real prompt; omitting the format would undercount. Inputs plus explicit
 output reservation must fit; assertions must match. Requests remain text-only.
 
@@ -185,3 +185,9 @@ files and original startup environment, then restart only the authorized ComfyUI
 instance. Keep original profiles, containers, SQLite, outputs and historical
 reports. After a running worker restart, expect quarantine if its old model is
 still alive. Never use global kill/pkill, deployment-group stop, or hot reload.
+
+
+Managed structured outputs now use original-schema result validation and a bounded
+shared compatibility policy. See [structured output](structured-output.md) for
+finite-key conversion, explicit post-validation mode, pinned build capability
+declarations, diagnostic metadata and migration impact.

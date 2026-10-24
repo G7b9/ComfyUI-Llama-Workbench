@@ -134,8 +134,11 @@ class NInferProfile:
     model_alias: str = "ninfer-gsq-27b"
     api_key_env: str = ""
     adopt_container_id: str = ""
+    structured_output_keywords: tuple[str, ...] = ()
 
     def __post_init__(self):
+        from .structured import check_capability_config
+        check_capability_config(self)
         if self.engine != "ninfer":
             raise ValueError("NInfer engine must be ninfer")
         for name in ("model_sha256", "binary_sha256"):

@@ -330,3 +330,8 @@ Skill 状态解析。测试不需要 ComfyUI、模型或 GPU。
 ## 受管 NInfer 与 turbo
 
 管理员 profile 可选择 NInfer Docker 或 llama.cpp，继续共用原生队列与 Chat/Skill 后端。新增 Managed Profile 节点无需把 `.ninfer` 填入 GGUF 启动节点。所有权、GPU 交接、视觉预算、导演台兼容与验收见[受管引擎文档](docs/managed-engines.md)。
+
+## 结构化输出兼容
+
+受管队列与 Managed Profile 支持有限枚举键的等价转换，并按原始 schema 校验最终输出。
+兼容模式、后端能力边界、任务诊断与迁移说明见 [结构化输出说明](docs/structured-output.md)。

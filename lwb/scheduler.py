@@ -24,6 +24,7 @@ import uuid
 
 import requests
 
+from .structured import (StructuredOutputError, check_local_schema, prepare, validate_response, walk, pointer)
 from .process import OWNED_SERVER, ServerLaunchConfig, ServerLaunchError, ServerStartupTimeout
 from .engines import EngineManager, ExecutionGate, NInferProfile, container_dead, fingerprint, gpu_clear
 
@@ -59,9 +60,12 @@ def canonical(value):
 def profile_digest_config(config):
     """Keep the pre-engine llama profile identity for newly-added inert defaults."""
     value = asdict(config)
+    if not value.get("structured_output_keywords"):
+        value.pop("structured_output_keywords", None)
     if value.get("engine", "llama.cpp") == "llama.cpp":
         for field, default in {"engine": "llama.cpp", "switch_lock": "", "model_sha256": "",
-                "binary_sha256": "", "mmproj_sha256": "", "api_key_env": "", "model_alias": ""}.items():
+                "binary_sha256": "", "mmproj_sha256": "", "api_key_env": "", "model_alias": "",
+                }.items():
             if value.get(field) == default:
                 value.pop(field, None)
     return value
@@ -76,6 +80,7 @@ def validate_payload(payload):
         "max_tokens",
         "chat_template_kwargs",
         "response_format",
+        "structured_output_mode",
         "input_tokens",
     }
     if set(payload) - allowed:
@@ -119,7 +124,12 @@ def validate_payload(payload):
         raise ValueError("input_tokens must be a nonnegative integer assertion")
     if "chat_template_kwargs" in payload and not isinstance(payload["chat_template_kwargs"], dict):
         raise ValueError("chat_template_kwargs must be an object")
+    mode = payload.get("structured_output_mode", "enforce")
+    if not isinstance(mode, str) or mode not in {"enforce", "post_validate"}:
+        raise ValueError("structured_output_mode must be enforce or post_validate")
     fmt = payload.get("response_format")
+    if "structured_output_mode" in payload and (not isinstance(fmt, dict) or fmt.get("type") != "json_schema"):
+        raise ValueError("structured_output_mode requires json_schema")
     if fmt is not None:
         if not isinstance(fmt, dict) or fmt.get("type") not in {
             "text",
@@ -143,10 +153,10 @@ def validate_payload(payload):
                 raise ValueError("json_schema requires name and schema object")
             if "strict" in schema and type(schema["strict"]) is not bool:
                 raise ValueError("json_schema.strict must be boolean")
-            from jsonschema import Draft202012Validator
-
             try:
-                Draft202012Validator.check_schema(schema["schema"])
+                check_local_schema(schema["schema"])
+            except StructuredOutputError:
+                raise
             except Exception as exc:
                 raise ValueError("invalid JSON schema") from exc
         elif set(fmt) != {"type"}:
@@ -167,9 +177,12 @@ class ManagedServerProfile(ServerLaunchConfig):
     mmproj_sha256: str = ""
     api_key_env: str = ""
     model_alias: str = ""
+    structured_output_keywords: tuple[str, ...] = ()
 
     def __post_init__(self):
         ServerLaunchConfig.__post_init__(self)
+        from .structured import check_capability_config
+        check_capability_config(self)
         if self.engine != "llama.cpp":
             raise ValueError("llama.cpp profile engine must be llama.cpp")
         if self.model_alias and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", self.model_alias):
@@ -577,9 +590,10 @@ class Scheduler:
         return response.json()
 
     def infer(self, backend, payload, on_preflight=lambda info: None):
-        info = self.preflight(backend, payload)
+        prepared = []
+        info = self.preflight(backend, payload, prepared=prepared)
         on_preflight(info)
-        body = {k: v for k, v in payload.items() if k != "input_tokens"}
+        body = {k: v for k, v in prepared[0].items() if k != "input_tokens"}
         body.update(model=info["model_id"], stream=False)
         # One submission, one endpoint, no compatibility retry under any error.
         response = backend._session.post(
@@ -588,11 +602,18 @@ class Scheduler:
         )
         return response, info
 
-    def preflight(self, backend, payload, multimodal=False):
+    def preflight(self, backend, payload, multimodal=False, prepared=None):
         session = backend._session  # trust_env=False, including SOCKS proxies
         base = backend.server_url
         models = self._json(session, base, "/v1/models")
         props = self._json(session, base, "/props")
+        config = self.engine.config
+        engine_name = props.get("backend") or getattr(config, "engine", "unknown")
+        payload, structured = prepare(payload, backend=engine_name,
+            keywords=getattr(config, "structured_output_keywords", ()),
+            binary_sha256=getattr(config, "binary_sha256", None))
+        if prepared is not None:
+            prepared.append(payload)
         model_id = models["data"][0]["id"]
         actual_ctx = props.get("default_generation_settings", {}).get("n_ctx")
         if type(actual_ctx) is not int or actual_ctx <= 0:
@@ -618,7 +639,24 @@ class Scheduler:
                 raise ValueError("invalid multimodal token count")
             method = "NInfer responses/input_tokens (text + decoded media)"
         else:
-            rendered = self._json(session, base, "/apply-template", template_body)
+            try:
+                rendered = self._json(session, base, "/apply-template", template_body)
+            except CapabilityError as exc:
+                exc.detail.update(backend=engine_name, stage="template_rendering")
+                # Preserve the original backend body and provide all matching schema
+                # locations rather than inventing an exact path when ambiguous.
+                message = json.dumps(exc.detail["body"], ensure_ascii=False)
+                match = re.search(r"unsupported JSON schema keyword: ([A-Za-z$]+)", message)
+                if match and structured:
+                    keyword = match.group(1)
+                    schema = payload["response_format"]["json_schema"]["schema"]
+                    paths = [pointer((*path, keyword)) for path, node in walk(schema)
+                             if isinstance(node, dict) and keyword in node]
+                    exc.detail.update(keyword=keyword, schema_paths=paths,
+                                      conversion_available=False)
+                    if len(paths) == 1:
+                        exc.detail["schema_path"] = paths[0]
+                raise
             tokens = self._json(
                 session, base, "/tokenize",
                 {"content": rendered["prompt"], "add_special": True, "parse_special": True},
@@ -639,6 +677,8 @@ class Scheduler:
             "input_tokens": count,
             "token_counting": {"available": True, "method": method},
         }
+        if structured:
+            info["structured_output"] = structured
         return info
 
     def release_workflow(self):
@@ -680,7 +720,7 @@ class Scheduler:
                 identity(self.engine.identity(process_identity, boot_id))
                 body = {k: v for k, v in settings.items() if k in {
                     "temperature", "max_tokens", "top_p", "top_k", "min_p", "presence_penalty",
-                    "repeat_penalty", "seed", "response_format", "chat_template_kwargs"}}
+                    "repeat_penalty", "seed", "response_format", "structured_output_mode", "chat_template_kwargs"}}
                 body["messages"] = messages
                 if type(body.get("max_tokens")) is not int or body["max_tokens"] <= 0:
                     raise ValueError("Managed Chat requires explicit positive max_tokens")
@@ -689,7 +729,10 @@ class Scheduler:
                         "enable_thinking": bool(settings["enable_thinking"])}
                 self.engine.begin_request("workflow")
                 active = True
-                info = self.preflight(backend, body, multimodal=has_media(messages))
+                original_body = body
+                prepared = []
+                info = self.preflight(backend, body, multimodal=has_media(messages), prepared=prepared)
+                body = prepared[0]
                 info.update(self.engine.snapshot(profile, self.engine.identity(process_identity, boot_id)))
                 self.journal.meta("model", info)
                 body.update(model=info["model_id"], stream=False)
@@ -701,7 +744,10 @@ class Scheduler:
                 data = r.json()
                 if not isinstance(data, dict) or not data.get("choices"):
                     raise BackendError("Invalid managed chat response")
+                validate_response(original_body, data, info.get("engine", "unknown"))
                 return _chat_response_from_choice(data["choices"][0])
+            except StructuredOutputError as exc:
+                raise BackendError(str(exc)) from exc
             except (requests.RequestException, ServerStartupTimeout):
                 self.blocked = True
                 raise
@@ -823,7 +869,8 @@ class Scheduler:
                         rid,
                         state="failed",
                         model=info,
-                        error={"kind": "backend_http", "status": response.status_code, "body": raw},
+                        error={"kind": "backend_http", "status": response.status_code, "body": raw,
+                               "stage": "inference", "backend": snapshot["engine"]},
                     )
                 if not isinstance(raw, dict) or not raw.get("choices"):
                     return self.journal.update(
@@ -832,6 +879,13 @@ class Scheduler:
                         model=info,
                         error={"kind": "invalid_response", "body": raw},
                     )
+                try:
+                    validate_response(payload, raw, snapshot["engine"])
+                except StructuredOutputError as exc:
+                    return self.journal.update(rid, state="failed", model=info,
+                        response=raw, usage=raw.get("usage"), error=exc.detail,
+                        finish_reason=[c.get("finish_reason") if isinstance(c, dict) else None
+                                       for c in raw["choices"]])
                 return self.journal.update(
                     rid,
                     state="completed",
@@ -849,7 +903,7 @@ class Scheduler:
                     state="result_unknown",
                     error={"kind": "startup_timeout", "message": str(exc), "lease_retained": True},
                 )
-            except CapabilityError as exc:
+            except (CapabilityError, StructuredOutputError) as exc:
                 return self.journal.update(rid, state="failed", error=exc.detail)
             except requests.RequestException as exc:
                 self.blocked = True
@@ -1146,6 +1200,8 @@ def install():
             raise web.HTTPForbidden(text="authentication required")
         except KeyError:
             raise web.HTTPNotFound(text="unknown request or missing required field")
+        except StructuredOutputError as exc:
+            return web.json_response({"error": exc.detail}, status=400)
         except (ValueError, TypeError) as exc:
             raise web.HTTPBadRequest(text=str(exc))
 
