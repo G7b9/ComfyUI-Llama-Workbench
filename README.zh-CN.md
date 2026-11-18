@@ -121,6 +121,17 @@ Chat 完成后会保留输入消息，修改 `thinking` 等请求参数后再次
 
 ## Qwen-Image-2.1 Prompt Enhancer
 
+如果只需要手动输出参数，无需 backend 或大语言模型推理，可使用
+`Llama Workbench / Generation` 分类下的 **Llama Workbench Qwen Image 2.1 PE Manual**。
+该节点将 `prompt` 原样作为 `rewritten_prompt` 输出，同时提供 `wh_ratio`、
+`ratio_follow` 和 `result_json`，与原 Prompt Enhancer 的前四个输出接口一致。
+保持 `ratio_follow=none` 时使用手填 `wh_ratio`，例如 `16:9` 或 `9:19.5`（规范化为 `6:13`）；
+选择 `<image1>`～`<image10>` 时跟随对应顺序的参考图，自动清空输出 `wh_ratio`，忽略其输入值。
+将两个比例输出同时连接到 **PE Canvas**，参考图按相同顺序直接连接到 Canvas 和图像编码器。
+Canvas 会检查所选参考图是否存在，`follow_input_size` 仍控制跟随原尺寸或仅跟随宽高比。
+手动节点不会从提示词推断比例，也不会改写图片引用；只需要尺寸参数时可将 `prompt` 留空。
+更新后重启 ComfyUI 即可注册新节点。
+
 使用兼容的 `llama-server` 和本地 GGUF 配置 **Llama Workbench Start Server**，再将
 backend 连接到 **Llama Workbench Qwen Image 2.1 Prompt Enhancer**。第一阶段重点测试
 [`pottokao/Qwen-Image-2.1-PE-T2I-Heretic-GGUF`](https://huggingface.co/pottokao/Qwen-Image-2.1-PE-T2I-Heretic-GGUF)。

@@ -185,6 +185,32 @@ class PromptRewriteCanvasSpec:
     ratio_source: str
 
 
+def manual_prompt_rewrite(
+    prompt: str, wh_ratio: str = "1:1", ratio_follow: str = "none"
+) -> PromptRewriteResult:
+    """Build PE-compatible fields without rewriting text or running a backend.
+
+    Reference availability is checked by Canvas, where the images are connected.
+    A selected reference takes precedence over the manually entered ratio.
+    """
+
+    follow = str(ratio_follow or "").strip()
+    if follow == "none":
+        follow = ""
+    if follow:
+        match = _IMAGE_REFERENCE.fullmatch(follow)
+        if not match or not 1 <= int(match.group(1)) <= MAX_PROMPT_REWRITE_IMAGES:
+            raise ValueError(
+                f"ratio_follow must be none, empty, or <image1> through <image{MAX_PROMPT_REWRITE_IMAGES}>"
+            )
+        ratio = ""
+    else:
+        _, _, ratio = _normalize_ratio(str(wh_ratio or "").strip())
+    return PromptRewriteResult(
+        rewritten_prompt=prompt, wh_ratio=ratio, ratio_follow=follow, thinking=""
+    )
+
+
 def get_prompt_rewrite_profile(task: str) -> PromptRewriteProfile:
     name = str(task or "").strip().lower()
     if name == "i2i":

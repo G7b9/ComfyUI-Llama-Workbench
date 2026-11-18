@@ -20,6 +20,7 @@ from .prompt_rewrite import (
     MAX_PROMPT_REWRITE_IMAGES,
     PROMPT_REWRITE_AUTO_ASPECT_RATIO,
     QWEN_IMAGE_21_ASPECT_RATIOS,
+    manual_prompt_rewrite,
     prompt_rewrite_canvas_spec,
     prompt_rewrite_dimensions,
     rewrite_prompt,
@@ -1003,6 +1004,48 @@ class LlamaWorkbenchPromptEnhancer:
         return {"ui": ui, "result": outputs}
 
 
+class LlamaWorkbenchQwenImage21PEManual:
+    """Pass through a prompt and emit manually selected PE sizing fields."""
+
+    CATEGORY = "Llama Workbench / Generation"
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("rewritten_prompt", "wh_ratio", "ratio_follow", "result_json")
+    FUNCTION = "build"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": True,
+                        "tooltip": "Passed through unchanged; no backend or language model is used.",
+                    },
+                ),
+                "wh_ratio": (
+                    "STRING",
+                    {
+                        "default": "1:1",
+                        "tooltip": "Manual W:H ratio, e.g. 16:9 or 9:19.5. Ignored when ratio_follow selects an image.",
+                    },
+                ),
+                "ratio_follow": (
+                    ["none", *[f"<image{index}>" for index in range(1, MAX_PROMPT_REWRITE_IMAGES + 1)]],
+                    {
+                        "default": "none",
+                        "tooltip": "none uses wh_ratio. Selecting an image clears wh_ratio; connect that ordered reference to PE Canvas.",
+                    },
+                ),
+            }
+        }
+
+    def build(self, prompt: str, wh_ratio: str = "1:1", ratio_follow: str = "none"):
+        result = manual_prompt_rewrite(prompt, wh_ratio, ratio_follow)
+        return result.rewritten_prompt, result.wh_ratio, result.ratio_follow, result.as_json()
+
+
 class LlamaWorkbenchQwenImage21PEResolution:
     """Turn Prompt Enhancer's aspect-ratio output into latent dimensions."""
 
@@ -1530,6 +1573,7 @@ NODE_CLASS_MAPPINGS = {
     "LlamaWorkbench_ReleaseEmbedded": LlamaWorkbenchReleaseEmbedded,
     "LlamaWorkbench_Prompt": LlamaWorkbenchPrompt,
     "LlamaWorkbench_PromptEnhancer": LlamaWorkbenchPromptEnhancer,
+    "LlamaWorkbench_QwenImage21PEManual": LlamaWorkbenchQwenImage21PEManual,
     "LlamaWorkbench_QwenImage21PEResolution": LlamaWorkbenchQwenImage21PEResolution,
     "LlamaWorkbench_QwenImage21PECanvas": LlamaWorkbenchQwenImage21PECanvas,
     "LlamaWorkbench_ChatSettings": LlamaWorkbenchChatSettings,
@@ -1553,6 +1597,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LlamaWorkbench_ReleaseEmbedded": "Llama Workbench Release Embedded Model",
     "LlamaWorkbench_Prompt": "Llama Workbench Prompt / Image2Prompt",
     "LlamaWorkbench_PromptEnhancer": "Llama Workbench Qwen Image 2.1 Prompt Enhancer",
+    "LlamaWorkbench_QwenImage21PEManual": "Llama Workbench Qwen Image 2.1 PE Manual",
     "LlamaWorkbench_QwenImage21PEResolution": "Llama Workbench Qwen Image 2.1 PE Resolution",
     "LlamaWorkbench_QwenImage21PECanvas": "Llama Workbench Qwen Image 2.1 PE Canvas",
     "LlamaWorkbench_ChatSettings": "Llama Workbench Chat Settings",

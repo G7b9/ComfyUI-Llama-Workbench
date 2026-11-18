@@ -138,6 +138,20 @@ editing a widget alone does not queue a new run or alter a request already runni
 
 ## Qwen-Image-2.1 Prompt Enhancer
 
+For manual parameters without a backend or language-model inference, use
+**Llama Workbench Qwen Image 2.1 PE Manual** under `Llama Workbench / Generation`.
+It passes `prompt` through unchanged as `rewritten_prompt`, and emits `wh_ratio`,
+`ratio_follow`, and `result_json` using the same first four output sockets as the
+enhancer. Leave `ratio_follow=none` to use a manual `wh_ratio` such as `16:9` or
+`9:19.5` (normalized to `6:13`). Select `<image1>`…`<image10>` to follow an ordered
+reference instead; this clears the output `wh_ratio` and ignores its input.
+Connect both sizing outputs to **PE Canvas**, and connect reference images directly
+to Canvas and the image encoder in matching order. Canvas checks that the selected
+reference exists; `follow_input_size` still controls size versus aspect-only following.
+The manual node does not infer a ratio from the prompt or rewrite image references.
+`prompt` may be empty when only sizing parameters are needed. Restart ComfyUI after
+updating to register the new node.
+
 Use **Llama Workbench Start Server** with a compatible `llama-server` and local
 GGUF, then connect its backend to **Llama Workbench Qwen Image 2.1 Prompt
 Enhancer**. Phase-one testing targets
