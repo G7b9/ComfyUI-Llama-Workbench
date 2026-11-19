@@ -1,6 +1,7 @@
 import { app } from "../../scripts/app.js";
 
 const SEED_NODE = "LlamaWorkbench_Seed";
+const SEED_LIST_NODE = "LlamaWorkbench_SeedList";
 const SEED_MAX = Number.MAX_SAFE_INTEGER;
 const SEED_MODES = new Set(["fixed", "increment", "decrement", "randomize"]);
 
@@ -128,7 +129,7 @@ function addSeedControls(node) {
 app.registerExtension({
   name: "LlamaWorkbench.SeedControls",
   beforeRegisterNodeDef(nodeType, nodeData) {
-    if (nodeData.name !== SEED_NODE) return;
+    if (nodeData.name !== SEED_NODE && nodeData.name !== SEED_LIST_NODE) return;
 
     const onNodeCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {

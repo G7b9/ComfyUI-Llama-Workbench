@@ -35,7 +35,7 @@ from .skills import (
     parse_flow_state,
     parse_skill_state,
 )
-from .seed import LlamaWorkbenchSeed
+from .seed import LlamaWorkbenchSeed, LlamaWorkbenchSeedList
 from .scheduler import LlamaWorkbenchQueuedText
 
 
@@ -1581,6 +1581,7 @@ NODE_CLASS_MAPPINGS = {
     "LlamaWorkbench_Chat": LlamaWorkbenchChat,
     "LlamaWorkbench_ChatDisplay": LlamaWorkbenchChatDisplay,
     "LlamaWorkbench_Seed": LlamaWorkbenchSeed,
+    "LlamaWorkbench_SeedList": LlamaWorkbenchSeedList,
     "LlamaWorkbench_ImageInfo": LlamaWorkbenchImageInfo,
     "LlamaWorkbench_ImageInfoDisplay": LlamaWorkbenchImageInfoDisplay,
     "LlamaWorkbench_PadImageToMultiple": LlamaWorkbenchPadImageToMultiple,
@@ -1605,6 +1606,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LlamaWorkbench_Chat": "Llama Workbench Chat",
     "LlamaWorkbench_ChatDisplay": "Llama Workbench Chat Output Display",
     "LlamaWorkbench_Seed": "Llama Workbench Seed",
+    "LlamaWorkbench_SeedList": "Llama Workbench Seed List",
     "LlamaWorkbench_ImageInfo": "Llama Workbench Image Info",
     "LlamaWorkbench_ImageInfoDisplay": "Llama Workbench Image Info Display",
     "LlamaWorkbench_PadImageToMultiple": "Llama Workbench Pad Image to Multiple",

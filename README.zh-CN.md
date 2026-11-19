@@ -81,6 +81,17 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 | Llama Workbench Chat Settings | 系统提示词、采样、上下文历史和图像尺寸控制。 |
 | Llama Workbench Skill Loader | 加载一个包内 Skill、自动选择 Skill，或进行普通聊天。 |
 | Llama Workbench Seed | 输出一个整数 seed，并提供一键固定随机、每次随机、递增、递减和固定控制。 |
+| Llama Workbench Seed List | 根据基础 seed 和 count 生成 1～1024 个不重复、可复现的 seed，沿用 Seed 的全部快捷按钮。输出单个基础 `SEED`、ComfyUI 原生列表 `SEEDS` 和 `seeds_json`。 |
+
+生成多个 seed 时，添加 **Llama Workbench Seed List**，设置 `count`（默认 4），点击
+**New Fixed Random** 即可。基础 `seed` 决定整组列表，且是列表第一项；保持 fixed 时，
+重复运行或保存并重新加载工作流都会得到相同列表。可以先点击按钮再设置数量，增大数量会
+保留原列表的前缀。**Randomize Each Run** 每轮更换基础 seed，从而更换整组列表；递增、
+递减按钮修改基础 seed，并重新生成其余列表项。
+将 `SEEDS` 直接接到采样器的 seed 输入，会按每个 seed 分别执行采样；`SEED` 输出单个基础值，
+`seeds_json` 用于查看或导出完整列表。这是 ComfyUI 原生列表执行，不是 latent batch，
+也不等同于第三方节点的列表容器。seed 范围与原节点一致，下游节点可能有更小的范围限制。
+原有 **Llama Workbench Seed** 功能保持不变。更新后重启 ComfyUI 并刷新页面以加载新节点和按钮。
 
 ## 可导入工作流
 

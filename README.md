@@ -90,6 +90,20 @@ long reasoning or unlimited-token responses.
 | Llama Workbench Chat Settings | System prompt, sampling, context-history, and image-size controls. |
 | Llama Workbench Skill Loader | Loads one package-local Skill, Auto selection, or normal chat. |
 | Llama Workbench Seed | Outputs an integer seed from 0 to 9007199254740991 (JavaScript's safe integer range), with one-click fixed random, randomize-each-run, increment, decrement, and fixed controls. Downstream nodes may enforce smaller seed ranges. |
+| Llama Workbench Seed List | Generates a reproducible list of 1–1024 distinct seeds using a base seed and count, with the same quick controls as Seed. Outputs the base `SEED`, a native ComfyUI `SEEDS` list, and `seeds_json`. |
+
+To generate several seeds, add **Llama Workbench Seed List**, set `count` (default 4),
+and click **New Fixed Random**. The base `seed` determines the entire list, with that
+seed as the first item; keeping it fixed reproduces the list across runs and workflow
+reloads. You can change the count before or after clicking; increasing it preserves
+the existing prefix. **Randomize Each Run** chooses a new base seed for each queued
+run. Increment/decrement updates the base seed and regenerates the rest of the list.
+Connect `SEEDS` directly to a sampler's seed input to run it once per seed; use `SEED`
+for a single value and `seeds_json` to inspect or export the complete list. This is
+ComfyUI's native list execution, not a latent batch or a third-party list container.
+Seeds retain the same JavaScript-safe range as the original Seed node; downstream
+nodes may have smaller limits. The original **Llama Workbench Seed** is unchanged.
+Restart ComfyUI and refresh its page after updating to load the new node and buttons.
 
 ## Importable workflows
 
