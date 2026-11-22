@@ -11,6 +11,11 @@ from lwb.image_compare import LlamaWorkbenchImageCompare
 from lwb.nodes import NODE_CLASS_MAPPINGS
 
 
+class ExecutionBlocker:
+    def __init__(self, message):
+        self.message = message
+
+
 @pytest.fixture
 def previewer(monkeypatch):
     calls = []
@@ -24,6 +29,7 @@ def previewer(monkeypatch):
             ]}}
 
     monkeypatch.setitem(sys.modules, "nodes", types.SimpleNamespace(PreviewImage=PreviewImage))
+    monkeypatch.setitem(sys.modules, "comfy_execution.graph", types.SimpleNamespace(ExecutionBlocker=ExecutionBlocker))
     return calls
 
 
@@ -40,17 +46,21 @@ def test_compare_aggregates_mapped_outputs_and_batches_in_order(previewer):
     assert all(saved is original for (saved, _), original in zip(previewer, [a, b1, b2]))
     assert len({item["filename"] for item in data["a"] + data["b"]}) == 5
     assert "images" not in result["ui"]  # Avoid ComfyUI's additional generic gallery.
-    json.dumps(result)
+    json.dumps(result["ui"])
+    assert all(isinstance(value, ExecutionBlocker) for value in result["result"])
 
 
 def test_empty_batch_and_native_list_contract(previewer):
     empty = np.zeros((0, 24, 32, 3))
     result = LlamaWorkbenchImageCompare().compare([empty], [], [False])
-    assert result["ui"]["comparison"] == [{"a": [], "b": [], "repeat": False}]
+    assert result["ui"]["comparison"] == [{
+        "a": [], "b": [], "repeat": False, "selection_enabled": False, "selected_index": -1,
+    }]
     assert previewer == []
     assert LlamaWorkbenchImageCompare.INPUT_IS_LIST is True
     assert LlamaWorkbenchImageCompare.OUTPUT_NODE is True
-    assert LlamaWorkbenchImageCompare.RETURN_TYPES == ()
+    assert LlamaWorkbenchImageCompare.RETURN_TYPES == ("INT", "IMAGE", "IMAGE")
+    assert LlamaWorkbenchImageCompare.RETURN_NAMES == ("index", "selected_a", "selected_b")
     assert NODE_CLASS_MAPPINGS["LlamaWorkbench_ImageCompare"] is LlamaWorkbenchImageCompare
 
 
@@ -72,7 +82,64 @@ def test_invalid_input_fails_before_writing_previews(previewer, shape):
 def test_runs_have_distinct_preview_urls(previewer):
     a = np.zeros((1, 8, 8, 3))
     node = LlamaWorkbenchImageCompare()
-    assert node.compare([a], [a]) != node.compare([a], [a])
+    assert node.compare([a], [a])["ui"] != node.compare([a], [a])["ui"]
+
+
+def test_selected_pair_indexes_across_batches_and_preserves_original_images(previewer):
+    a1 = np.zeros((2, 24, 32, 3), dtype=np.float32)
+    a2 = np.full((2, 8, 16, 4), 0.125, dtype=np.float32)
+    b = np.stack([np.full((4, 6, 3), i / 7, dtype=np.float32) for i in range(4)])
+    output = LlamaWorkbenchImageCompare().compare([a1, a2], [b], [False], [True], [3])
+    index, selected_a, selected_b = output["result"]
+    assert index == 3
+    assert selected_a.shape == (1, 8, 16, 4)
+    assert selected_b.shape == (1, 4, 6, 3)
+    assert selected_a.dtype == a2.dtype
+    np.testing.assert_array_equal(selected_a, a2[1:2])
+    np.testing.assert_array_equal(selected_b, b[3:4])
+    assert np.shares_memory(selected_a, a2)
+    assert np.shares_memory(selected_b, b)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("short_count", [1, 2])
+def test_selected_repeat_pair_outputs_last_image_of_short_group(previewer, reverse, short_count):
+    short = np.stack([np.full((8, 8, 3), i / 3) for i in range(short_count)])
+    long = np.stack([np.full((8, 8, 3), i / 5) for i in range(4)])
+    a, b = (long, short) if reverse else (short, long)
+    index, selected_a, selected_b = LlamaWorkbenchImageCompare().compare([a], [b], True, True, 3)["result"]
+    assert index == 3
+    np.testing.assert_array_equal(selected_a, a[-1:])
+    np.testing.assert_array_equal(selected_b, b[-1:])
+
+
+@pytest.mark.parametrize("enabled,index,repeat", [
+    (False, 0, True), (True, -1, True), (True, 4, True), (True, 2, False),
+])
+def test_invalid_or_disabled_selection_blocks_outputs_but_keeps_preview(previewer, enabled, index, repeat):
+    a = np.zeros((1, 8, 8, 3))
+    b = np.zeros((4, 8, 8, 3))
+    output = LlamaWorkbenchImageCompare().compare([a], [b], [repeat], [enabled], [index])
+    assert len(output["ui"]["comparison"][0]["b"]) == 4
+    assert all(isinstance(value, ExecutionBlocker) and value.message is None for value in output["result"])
+
+
+def test_selected_first_pair_uses_zero_based_index(previewer):
+    a = np.zeros((1, 8, 8, 3))
+    result = LlamaWorkbenchImageCompare().compare([a], [a], False, True, 0)["result"]
+    assert result[0] == 0
+    np.testing.assert_array_equal(result[1], a)
+
+
+def test_empty_group_cannot_be_selected_even_with_repeat(previewer):
+    result = LlamaWorkbenchImageCompare().compare([], [np.zeros((1, 8, 8, 3))], True, True, 0)
+    assert all(isinstance(value, ExecutionBlocker) for value in result["result"])
+
+
+def test_invalid_index_type_is_rejected(previewer):
+    a = np.zeros((1, 8, 8, 3))
+    with pytest.raises(ValueError, match="selected_index must be an integer"):
+        LlamaWorkbenchImageCompare().compare([a], [a], False, True, 0.5)
 
 
 def test_frontend_pairs_by_index_and_repeats_only_the_last_item():

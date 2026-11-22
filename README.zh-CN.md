@@ -82,7 +82,7 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 | Llama Workbench Skill Loader | 加载一个包内 Skill、自动选择 Skill，或进行普通聊天。 |
 | Llama Workbench Seed | 输出一个整数 seed，并提供一键固定随机、每次随机、递增、递减和固定控制。 |
 | Llama Workbench Seed List | 根据基础 seed 和 count 生成 1～1024 个不重复、可复现的 seed，沿用 Seed 的全部快捷按钮。输出单个基础 `SEED`、ComfyUI 原生列表 `SEEDS` 和 `seeds_json`。 |
-| Llama Workbench Batch Image Compare | 汇总单图、batch 和上游 IMAGE 列表，按索引同时预览 A/B 各组对比；支持并排、滑动对比，以及重复较短组的最后一张补齐。 |
+| Llama Workbench Batch Image Compare | 汇总单图、batch 和 IMAGE 列表，按索引预览 A/B 对比；支持重复末张补齐、鼠标跟随分割线，以及单选输出索引与原始 A/B 图片。 |
 
 生成多个 seed 时，添加 **Llama Workbench Seed List**，设置 `count`（默认 4），点击
 **New Fixed Random** 即可。基础 `seed` 决定整组列表，且是列表第一项；保持 fixed 时，
@@ -104,10 +104,20 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 开启 `repeat` 会重复较短组的**最后一张**：A=[A1,A2]、B=[B1,B2,B3,B4] 时，
 得到 A1/B1、A2/B2、A2/B3、A2/B4。关闭时，未配对位置会显示缺图占位；空组无法重复补齐。
 预览完成后可以直接切换 repeat，无需重新生成图片。**Side by side** 为并排对比，
-**Slider** 为滑动对比，每对完整图片都有独立滑杆，也支持键盘操作。
+**Slider** 为滑动对比，每对完整图片的滑杆默认位于 **100%（完整显示 A 图）**。
+鼠标在对应图片上移动时，分割线与底部滑杆同步跟随；移出图片后保持当前位置。
+底部滑杆仍可拖动并支持键盘操作，移到 0% 时完整显示 B 图。
 图片保持宽高比和透明度，不同分辨率会适配同一预览区域，不拉伸；重复项会明确标注来源。
 
-该节点只预览，不修改或复制上游图像 tensor；预览使用 ComfyUI 临时目录中的原分辨率 PNG。
+开启 `selection_enabled` 后，每对图片下方显示单选项。勾选一对后再次运行工作流，
+输出 `index`（从 **0** 开始）、`selected_a` 和 `selected_b`。`selected_index=-1` 表示未选择，
+也可直接填写索引。输出图片是原始单张 batch `[1,H,W,C]`，保留各自尺寸、透明通道及精度。
+开启 repeat 时，补齐项输出较短组的最后一张原图。关闭选择模式、未选择、索引越界或缺图时，
+三个输出不会执行下游，但仍正常显示预览；缺图项不可勾选。所选索引会随工作流保存。
+再次运行以输出所选图片时，请固定上游 seed，以便继续使用同一组生成结果；如果上游输入变化，
+所选索引将作用于新生成的那组图片。
+
+节点不修改或复制上游图像 tensor；预览使用 ComfyUI 临时目录中的原分辨率 PNG。
 保存工作流会保留预览引用和显示模式，临时文件被清理后需重新运行节点。
 更新后重启 ComfyUI 并刷新页面。
 

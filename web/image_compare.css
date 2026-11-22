@@ -77,3 +77,14 @@
 }
 .lwb-compare[data-mode="slide"] .lwb-compare-slider { display: block; }
 .lwb-compare-slider:disabled { opacity: .35; }
+.lwb-compare-selection {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    cursor: pointer;
+}
+.lwb-compare[data-selection="true"] .lwb-compare-selection { display: flex; }
+.lwb-compare-selection input { accent-color: var(--compare-accent); margin: 0; }
+.lwb-compare-unpaired .lwb-compare-selection { opacity: .45; cursor: not-allowed; }
+.lwb-compare-selected { outline: 1px solid var(--compare-accent); }

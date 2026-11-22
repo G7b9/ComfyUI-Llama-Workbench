@@ -91,7 +91,7 @@ long reasoning or unlimited-token responses.
 | Llama Workbench Skill Loader | Loads one package-local Skill, Auto selection, or normal chat. |
 | Llama Workbench Seed | Outputs an integer seed from 0 to 9007199254740991 (JavaScript's safe integer range), with one-click fixed random, randomize-each-run, increment, decrement, and fixed controls. Downstream nodes may enforce smaller seed ranges. |
 | Llama Workbench Seed List | Generates a reproducible list of 1–1024 distinct seeds using a base seed and count, with the same quick controls as Seed. Outputs the base `SEED`, a native ComfyUI `SEEDS` list, and `seeds_json`. |
-| Llama Workbench Batch Image Compare | Collects single images, batches, and mapped IMAGE lists into an A/B comparison grid. Pairs by index, with side-by-side or slider views and optional last-image repeat. |
+| Llama Workbench Batch Image Compare | Collects single images, batches, and mapped IMAGE lists into an A/B grid. Supports last-image repeat, mouse-following slider comparison, and single-pair selection with index and original A/B image outputs. |
 
 To generate several seeds, add **Llama Workbench Seed List**, set `count` (default 4),
 and click **New Fixed Random**. The base `seed` determines the entire list, with that
@@ -119,10 +119,24 @@ B=[B1,B2,B3,B4] becomes A1/B1, A2/B2, A2/B3, A2/B4. With repeat off, unmatched
 positions show a missing-image placeholder. An empty group cannot be repeated.
 You can toggle repeat after execution without rerunning generation. Switch between
 **Side by side** and **Slider**; each complete pair has its own keyboard-accessible
-slider. Images keep their aspect ratio and alpha, and different resolutions fit the
+slider, initially at **100% (full A)**. Moving the mouse over a pair's image moves its
+divider and slider together; leaving the image keeps that position. The bottom slider
+still supports dragging and keyboard control. At 0% the full B image is shown.
+Images keep their aspect ratio and alpha, and different resolutions fit the
 same preview area without stretching. Repeated sources are explicitly labeled.
 
-This output node previews only; it does not resize or duplicate upstream tensors.
+Enable `selection_enabled` to show radio buttons below each pair. Select one pair,
+then run the workflow again to output `index` (zero-based), `selected_a`, and
+`selected_b`. `selected_index=-1` means no selection; the field also supports direct
+index entry. Selected images are original single-image batches `[1,H,W,C]`, retaining
+their own sizes, alpha and precision. Repeat uses the shorter group's last original
+image. Disabled selection, no selection, an out-of-range index, or a missing image
+blocks the three outputs while still displaying the preview; incomplete pairs cannot
+be selected in the UI. Selection is saved in the workflow. Keep upstream seeds fixed
+when rerunning to select from the same generated set; changed upstream inputs produce
+a new set, and the selected index applies to that new set.
+
+The node does not resize or duplicate upstream tensors.
 It uses ComfyUI's temporary PNG previews at original resolution. Saved workflows
 retain preview references and the view mode; if temporary files have been removed,
 run the node again to rebuild them. Restart ComfyUI and refresh the page after updating.
