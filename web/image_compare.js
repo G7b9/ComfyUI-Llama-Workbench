@@ -14,6 +14,21 @@ function hideSelectionWidgets(node) {
     }
 }
 
+function handlePreviewWheel(node, event) {
+    if (event.target?.closest?.(".lwb-compare-stage")) {
+        const canvas = typeof node.graph?.canvas?.processMouseWheel === "function"
+            ? node.graph.canvas : app.canvas;
+        if (typeof canvas?.processMouseWheel === "function") {
+            // DOM previews overlay the graph canvas, so bubbling alone cannot reach it.
+            // Forward the original event to preserve pointer position and zoom/pan settings.
+            canvas.processMouseWheel(event);
+            event.preventDefault();
+        }
+    }
+    // Prevent duplicate canvas handling; outside images, keep native gallery scrolling.
+    event.stopPropagation();
+}
+
 export function pairImages(a = [], b = [], repeat = false) {
     return Array.from({ length: Math.max(a.length, b.length) }, (_, index) => {
         const ai = index < a.length ? index : repeat && a.length ? a.length - 1 : -1;
@@ -147,10 +162,11 @@ export function mountCompare(node) {
     const grid = element("div", "lwb-compare-grid");
     toolbar.append(summary, modes);
     root.append(toolbar, hint, selectionHint, grid);
-    // Native controls own pointer/keyboard input; scrolling the grid must not zoom the graph.
-    for (const type of ["pointerdown", "mousedown", "dblclick", "keydown", "wheel"]) {
+    // Native controls own pointer/keyboard input; image wheel gestures belong to the graph.
+    for (const type of ["pointerdown", "mousedown", "dblclick", "keydown"]) {
         root.addEventListener(type, event => event.stopPropagation());
     }
+    root.addEventListener("wheel", event => handlePreviewWheel(node, event), { passive: false });
     const positions = {};
     const selectionGroup = `lwb-compare-selection-${++selectionGroupId}`;
     let data = null;

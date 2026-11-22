@@ -122,6 +122,8 @@ You can toggle repeat after execution without rerunning generation. Switch betwe
 slider, initially at **100% (full A)**. Moving the mouse over a pair's image moves its
 divider and slider together; leaving the image keeps that position. The bottom slider
 still supports dragging and keyboard control. At 0% the full B image is shown.
+Wheel gestures over an image go to the ComfyUI canvas, respecting its zoom/pan
+settings. Use the areas outside the images or the scrollbar to scroll the pair grid.
 Images keep their aspect ratio and alpha, and different resolutions fit the
 same preview area without stretching. Repeated sources are explicitly labeled.
 

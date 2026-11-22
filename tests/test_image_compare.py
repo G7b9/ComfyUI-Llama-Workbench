@@ -178,3 +178,43 @@ hideSelectionWidgets({widgets});
 assert.equal(widgets[2].value, 2);
 """
     subprocess.run(["node", "--input-type=module", "-e", script], check=True, capture_output=True, text=True)
+
+
+def test_image_wheel_reaches_canvas_once_without_swallowing_gallery_scroll():
+    source = (Path(__file__).parents[1] / "web" / "image_compare.js").read_text()
+    source = "\n".join(line for line in source.splitlines() if not line.startswith("import "))
+    script = """
+import assert from 'node:assert/strict';
+const app = {registerExtension() {}};
+const api = {};
+""" + source + """
+function wheel(overImage) {
+  return {target:{closest(selector) {assert.equal(selector,'.lwb-compare-stage');return overImage ? {} : null;}},
+    clientX: 420, clientY: 210, deltaX: 2, deltaY: -120, deltaMode: 1, ctrlKey: true,
+    prevented: 0, stopped: 0,
+    preventDefault() {this.prevented++;}, stopPropagation() {this.stopped++;}};
+}
+const calls = [];
+const graphCanvas = {processMouseWheel(event) {assert.equal(this, graphCanvas);calls.push(event);}};
+app.canvas = {processMouseWheel(event) {calls.push(event);}};
+const imageEvent = wheel(true);
+handlePreviewWheel({graph:{canvas:graphCanvas}}, imageEvent);
+assert.deepEqual(calls, [imageEvent]);
+assert.equal(calls[0], imageEvent); // Preserve native coordinates, modifiers, delta mode and deltas.
+assert.equal(imageEvent.prevented, 1);
+assert.equal(imageEvent.stopped, 1);
+const outsideEvent = wheel(false);
+handlePreviewWheel({graph:{canvas:graphCanvas}}, outsideEvent);
+assert.equal(calls.length, 1);
+assert.equal(outsideEvent.prevented, 0); // Browser can scroll the gallery.
+assert.equal(outsideEvent.stopped, 1);
+const fallback = wheel(true);
+handlePreviewWheel({graph:{canvas:{}}}, fallback);
+assert.equal(calls[1], fallback);
+assert.equal(calls.length, 2);
+delete app.canvas;
+const unavailable = wheel(true);
+handlePreviewWheel({}, unavailable);
+assert.equal(unavailable.prevented, 0);
+"""
+    subprocess.run(["node", "--input-type=module", "-e", script], check=True, capture_output=True, text=True)
