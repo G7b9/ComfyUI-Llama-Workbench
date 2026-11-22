@@ -72,12 +72,12 @@ class LlamaWorkbenchImageCompare:
             "optional": {
                 "selection_enabled": (
                     "BOOLEAN",
-                    {"default": False, "tooltip": "Show one-choice selection below each pair. Run again to send the selection downstream."},
+                    {"default": False, "tooltip": "Internal selection state, set by clicking a pair's checkmark. Retained for workflow compatibility."},
                 ),
                 "selected_index": (
                     "INT",
                     {"default": -1, "min": -1, "max": 2147483647, "control_after_generate": False,
-                     "tooltip": "Zero-based pair index; -1 means no selection. Updated by the pair radio buttons. Missing pairs block downstream outputs."},
+                     "tooltip": "Internal zero-based pair index; -1 means no selection. Set by the checkmark below a pair. Missing pairs block downstream outputs."},
                 ),
             },
         }

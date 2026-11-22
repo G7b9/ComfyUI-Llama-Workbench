@@ -125,10 +125,12 @@ still supports dragging and keyboard control. At 0% the full B image is shown.
 Images keep their aspect ratio and alpha, and different resolutions fit the
 same preview area without stretching. Repeated sources are explicitly labeled.
 
-Enable `selection_enabled` to show radio buttons below each pair. Select one pair,
-then run the workflow again to output `index` (zero-based), `selected_a`, and
-`selected_b`. `selected_index=-1` means no selection; the field also supports direct
-index entry. Selected images are original single-image batches `[1,H,W,C]`, retaining
+Each pair always has a gray checkmark underneath. Click it to select that pair:
+its checkmark lights up and all others stay gray. No mode switch or numeric entry
+is needed. Then run the workflow again to output `index` (zero-based), `selected_a`,
+and `selected_b`. The selection inputs remain hidden and serialized for workflow/API
+compatibility; new nodes start without a selection. Selected images are original
+single-image batches `[1,H,W,C]`, retaining
 their own sizes, alpha and precision. Repeat uses the shorter group's last original
 image. Disabled selection, no selection, an out-of-range index, or a missing image
 blocks the three outputs while still displaying the preview; incomplete pairs cannot

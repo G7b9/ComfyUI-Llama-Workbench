@@ -162,5 +162,19 @@ assert.equal(pairImages([], b, true)[0].repeatA, false);
 assert.equal(pairImages([], [], true).length, 0);
 assert.deepEqual(a, ['a1']);
 assert.equal(b.length, 4);
+// Internal controls stay serialized even though they no longer appear above the grid.
+const widgets = [
+  {name: 'repeat', value: true, type: 'toggle', options: {}},
+  {name: 'selection_enabled', value: true, type: 'toggle', options: {}},
+  {name: 'selected_index', value: 2, type: 'number', options: {min: -1}},
+];
+hideSelectionWidgets({widgets});
+assert.equal(widgets[0].hidden, undefined);
+assert.equal(widgets[1].hidden, true);
+assert.equal(widgets[2].options.hidden, true);
+assert.equal(widgets[2].type, 'number');
+assert.deepEqual(JSON.parse(JSON.stringify(widgets.filter(w=>w.serialize !== false).map(w=>w.value))), [true,true,2]);
+hideSelectionWidgets({widgets});
+assert.equal(widgets[2].value, 2);
 """
     subprocess.run(["node", "--input-type=module", "-e", script], check=True, capture_output=True, text=True)

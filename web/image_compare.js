@@ -4,6 +4,16 @@ import { api } from "../../scripts/api.js";
 const COMPARE_NODE = "LlamaWorkbench_ImageCompare";
 let selectionGroupId = 0;
 
+function hideSelectionWidgets(node) {
+    // Retain these inputs for workflow/API serialization, without exposing controls.
+    for (const widget of node.widgets || []) {
+        if (!["selection_enabled", "selected_index"].includes(widget.name)) continue;
+        widget.hidden = true;
+        widget.options ||= {};
+        widget.options.hidden = true;
+    }
+}
+
 export function pairImages(a = [], b = [], repeat = false) {
     return Array.from({ length: Math.max(a.length, b.length) }, (_, index) => {
         const ai = index < a.length ? index : repeat && a.length ? a.length - 1 : -1;
@@ -95,14 +105,16 @@ function pairCard(pair, index, positions, selectionGroup, select) {
     radio.type = "radio";
     radio.name = selectionGroup;
     radio.value = index;
+    radio.setAttribute("aria-label", `Select pair ${index + 1}`);
     radio.disabled = !pair.a || !pair.b;
     radio.onchange = () => { if (radio.checked) select(index); };
-    selection.append(radio, element("span", "", `Select pair ${index + 1} · index ${index}`));
+    selection.append(radio, element("span", "lwb-compare-selection-text", "Select this pair"));
     card.append(heading, labels, stage, slider, selection);
     return card;
 }
 
 export function mountCompare(node) {
+    hideSelectionWidgets(node);
     if (node.__lwbCompare) return node.__lwbCompare;
     if (!document.getElementById("lwb-image-compare-style")) {
         const style = document.createElement("link");
@@ -146,23 +158,26 @@ export function mountCompare(node) {
     function updateSelection() {
         const enabled = Boolean(inputValue("selection_enabled", false));
         const selected = Number(inputValue("selected_index", -1));
-        root.dataset.selection = String(enabled);
-        selectionHint.hidden = !enabled;
+        selectionHint.hidden = !data;
         let valid = false;
         for (const radio of grid.querySelectorAll('input[type="radio"]')) {
             radio.checked = enabled && !radio.disabled && Number(radio.value) === selected;
             radio.closest(".lwb-compare-card").classList.toggle("lwb-compare-selected", radio.checked);
+            radio.parentElement.querySelector(".lwb-compare-selection-text").textContent = radio.checked ? "Selected" : "Select this pair";
             valid ||= radio.checked;
         }
         selectionHint.textContent = valid
-            ? `Selected pair ${selected + 1} · index ${selected}. Run the workflow to output this pair.`
-            : selected >= 0 ? `Index ${selected} is unavailable. Choose a complete pair or enable repeat.`
-                : "Select one pair below, then run the workflow to output its index and images.";
+            ? `Selected pair ${selected + 1}. Run the workflow to output this pair.`
+            : enabled && selected >= 0 ? "The selected pair is unavailable. Choose a complete pair or enable repeat."
+                : "Click the checkmark below one pair, then run the workflow to output it.";
     }
     function select(index) {
         const widget = node.widgets?.find(item => item.name === "selected_index");
-        if (!widget) return;
+        const enabled = node.widgets?.find(item => item.name === "selection_enabled");
+        if (!widget || !enabled) return;
+        enabled.value = true;
         widget.value = index;
+        enabled.callback?.(true);
         widget.callback?.(index);
         updateSelection();
         node.setDirtyCanvas?.(true, true);
@@ -194,7 +209,7 @@ export function mountCompare(node) {
         serialize: false,
         hideOnZoom: false,
         getMinHeight: () => 360,
-        getHeight: () => Math.max(360, (node.size?.[1] || 640) - 166),
+        getHeight: () => Math.max(360, (node.size?.[1] || 640) - 110),
     });
     widget.serialize = false;
     const repeatWidget = node.widgets?.find(item => item.name === "repeat");
