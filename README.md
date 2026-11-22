@@ -91,6 +91,7 @@ long reasoning or unlimited-token responses.
 | Llama Workbench Skill Loader | Loads one package-local Skill, Auto selection, or normal chat. |
 | Llama Workbench Seed | Outputs an integer seed from 0 to 9007199254740991 (JavaScript's safe integer range), with one-click fixed random, randomize-each-run, increment, decrement, and fixed controls. Downstream nodes may enforce smaller seed ranges. |
 | Llama Workbench Seed List | Generates a reproducible list of 1–1024 distinct seeds using a base seed and count, with the same quick controls as Seed. Outputs the base `SEED`, a native ComfyUI `SEEDS` list, and `seeds_json`. |
+| Llama Workbench Batch Image Compare | Collects single images, batches, and mapped IMAGE lists into an A/B comparison grid. Pairs by index, with side-by-side or slider views and optional last-image repeat. |
 
 To generate several seeds, add **Llama Workbench Seed List**, set `count` (default 4),
 and click **New Fixed Random**. The base `seed` determines the entire list, with that
@@ -104,6 +105,27 @@ ComfyUI's native list execution, not a latent batch or a third-party list contai
 Seeds retain the same JavaScript-safe range as the original Seed node; downstream
 nodes may have smaller limits. The original **Llama Workbench Seed** is unchanged.
 Restart ComfyUI and refresh its page after updating to load the new node and buttons.
+
+## Batch image comparison
+
+Connect reference images to `image_a` and generated/processed images to `image_b` on
+**Llama Workbench Batch Image Compare** (`Llama Workbench / Utility`). Each group
+accepts a single image, a batch, or mapped IMAGE lists, including mixed resolutions.
+The node collects the entire list once, preserving list order and then batch order,
+and displays A1/B1, A2/B2, etc. in a scrollable grid. No index-extraction nodes are needed.
+
+Turn on `repeat` to fill the shorter group with its **last** image: A=[A1,A2] and
+B=[B1,B2,B3,B4] becomes A1/B1, A2/B2, A2/B3, A2/B4. With repeat off, unmatched
+positions show a missing-image placeholder. An empty group cannot be repeated.
+You can toggle repeat after execution without rerunning generation. Switch between
+**Side by side** and **Slider**; each complete pair has its own keyboard-accessible
+slider. Images keep their aspect ratio and alpha, and different resolutions fit the
+same preview area without stretching. Repeated sources are explicitly labeled.
+
+This output node previews only; it does not resize or duplicate upstream tensors.
+It uses ComfyUI's temporary PNG previews at original resolution. Saved workflows
+retain preview references and the view mode; if temporary files have been removed,
+run the node again to rebuild them. Restart ComfyUI and refresh the page after updating.
 
 ## Importable workflows
 

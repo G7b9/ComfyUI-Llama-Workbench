@@ -82,6 +82,7 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 | Llama Workbench Skill Loader | 加载一个包内 Skill、自动选择 Skill，或进行普通聊天。 |
 | Llama Workbench Seed | 输出一个整数 seed，并提供一键固定随机、每次随机、递增、递减和固定控制。 |
 | Llama Workbench Seed List | 根据基础 seed 和 count 生成 1～1024 个不重复、可复现的 seed，沿用 Seed 的全部快捷按钮。输出单个基础 `SEED`、ComfyUI 原生列表 `SEEDS` 和 `seeds_json`。 |
+| Llama Workbench Batch Image Compare | 汇总单图、batch 和上游 IMAGE 列表，按索引同时预览 A/B 各组对比；支持并排、滑动对比，以及重复较短组的最后一张补齐。 |
 
 生成多个 seed 时，添加 **Llama Workbench Seed List**，设置 `count`（默认 4），点击
 **New Fixed Random** 即可。基础 `seed` 决定整组列表，且是列表第一项；保持 fixed 时，
@@ -92,6 +93,23 @@ Prompt 请求的独立等待上限，默认 120 秒，与 **Llama Workbench Conn
 `seeds_json` 用于查看或导出完整列表。这是 ComfyUI 原生列表执行，不是 latent batch，
 也不等同于第三方节点的列表容器。seed 范围与原节点一致，下游节点可能有更小的范围限制。
 原有 **Llama Workbench Seed** 功能保持不变。更新后重启 ComfyUI 并刷新页面以加载新节点和按钮。
+
+## 批量图片对比
+
+添加 `Llama Workbench / Utility` 分类下的 **Llama Workbench Batch Image Compare**，
+参考图连接 `image_a`，生成或处理后的图连接 `image_b`。两组都支持单张图、IMAGE batch，
+以及上游逐项执行产生的 IMAGE 列表，也支持不同尺寸。节点一次性汇总全部输入，按列表顺序、
+再按 batch 内顺序排列，在可滚动网格中同时展示 A1/B1、A2/B2 等，无需多个“从列表获取项目”节点。
+
+开启 `repeat` 会重复较短组的**最后一张**：A=[A1,A2]、B=[B1,B2,B3,B4] 时，
+得到 A1/B1、A2/B2、A2/B3、A2/B4。关闭时，未配对位置会显示缺图占位；空组无法重复补齐。
+预览完成后可以直接切换 repeat，无需重新生成图片。**Side by side** 为并排对比，
+**Slider** 为滑动对比，每对完整图片都有独立滑杆，也支持键盘操作。
+图片保持宽高比和透明度，不同分辨率会适配同一预览区域，不拉伸；重复项会明确标注来源。
+
+该节点只预览，不修改或复制上游图像 tensor；预览使用 ComfyUI 临时目录中的原分辨率 PNG。
+保存工作流会保留预览引用和显示模式，临时文件被清理后需重新运行节点。
+更新后重启 ComfyUI 并刷新页面。
 
 ## 可导入工作流
 

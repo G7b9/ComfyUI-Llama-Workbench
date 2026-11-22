@@ -12,6 +12,7 @@ from typing import Any
 from .backend import EmbeddedBackend, ServerBackend, backend_descriptor, make_text_message
 from .embedded import EMBEDDED_MODELS, create_embedded_backend
 from .image_info import LlamaWorkbenchImageInfo, LlamaWorkbenchImageInfoDisplay
+from .image_compare import LlamaWorkbenchImageCompare
 from .image_padding import LlamaWorkbenchPadImageToMultiple, LlamaWorkbenchRestoreImageFromPadding
 from .media import image_tensor_to_data_urls
 from .process import OWNED_SERVER, ServerLaunchConfig
@@ -1584,6 +1585,7 @@ NODE_CLASS_MAPPINGS = {
     "LlamaWorkbench_SeedList": LlamaWorkbenchSeedList,
     "LlamaWorkbench_ImageInfo": LlamaWorkbenchImageInfo,
     "LlamaWorkbench_ImageInfoDisplay": LlamaWorkbenchImageInfoDisplay,
+    "LlamaWorkbench_ImageCompare": LlamaWorkbenchImageCompare,
     "LlamaWorkbench_PadImageToMultiple": LlamaWorkbenchPadImageToMultiple,
     "LlamaWorkbench_RestoreImageFromPadding": LlamaWorkbenchRestoreImageFromPadding,
 }
@@ -1609,6 +1611,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LlamaWorkbench_SeedList": "Llama Workbench Seed List",
     "LlamaWorkbench_ImageInfo": "Llama Workbench Image Info",
     "LlamaWorkbench_ImageInfoDisplay": "Llama Workbench Image Info Display",
+    "LlamaWorkbench_ImageCompare": "Llama Workbench Batch Image Compare",
     "LlamaWorkbench_PadImageToMultiple": "Llama Workbench Pad Image to Multiple",
     "LlamaWorkbench_RestoreImageFromPadding": "Llama Workbench Restore Image from Padding",
 }
